@@ -1,7 +1,7 @@
 FROM node:20-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm ci --no-audit --no-fund && test -x node_modules/.bin/vite
 COPY . .
 ARG VITE_API_BASE_URL=/api
 ARG VITE_WS_URL=

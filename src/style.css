@@ -324,6 +324,8 @@ input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-so
 .volume input { flex: 1; accent-color: var(--accent); }
 .tune-in { text-align: center; }
 .tune-in p { margin: 0; }
+.player-error { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.player-error .btn { flex: 0 0 auto; }
 .room-library { padding: 22px; }
 .room-library .library-heading h2 { font-size: 21px; }
 .room-library .library-grid, .room-library .library-loading { grid-template-columns: repeat(3, minmax(0, 1fr)); }

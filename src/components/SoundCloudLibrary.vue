@@ -12,11 +12,12 @@ const emit = defineEmits(['select'])
 
 const { sessionId } = useSoundCloudAuth()
 const library = ref(null)
-const activeTab = ref('playlists')
+const activeTab = ref('recentlyPlayed')
 const loading = ref(true)
 const error = ref('')
 
 const tabs = computed(() => [
+  { id: 'recentlyPlayed', label: 'Recently played', count: library.value?.recentlyPlayed?.length ?? 0 },
   { id: 'playlists', label: 'My playlists', count: library.value?.playlists?.length ?? 0 },
   { id: 'likedTracks', label: 'Liked tracks', count: library.value?.likedTracks?.length ?? 0 },
   { id: 'likedPlaylists', label: 'Liked playlists', count: library.value?.likedPlaylists?.length ?? 0 },

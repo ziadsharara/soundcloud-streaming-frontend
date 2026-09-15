@@ -11,20 +11,48 @@ export const WIDGET_OPTIONS = {
   download: false,
 }
 
-export const SOUNDCLOUD_URL = /^https?:\/\/((www|m|on)\.)?soundcloud\.com\/\S+/i
+const SOUNDCLOUD_HOSTS = new Set(['soundcloud.com', 'www.soundcloud.com', 'm.soundcloud.com', 'on.soundcloud.com'])
+
+export function isSoundCloudUrl(value) {
+  try {
+    const url = new URL(String(value || '').trim())
+    return (
+      url.protocol === 'https:' &&
+      SOUNDCLOUD_HOSTS.has(url.hostname.toLowerCase()) &&
+      !url.username &&
+      !url.password &&
+      !url.port &&
+      url.pathname !== '/'
+    )
+  } catch {
+    return false
+  }
+}
 
 let apiPromise = null
+const WIDGET_API_TIMEOUT_MS = 8000
 
 export function loadWidgetApi() {
   if (window.SC?.Widget) return Promise.resolve(window.SC)
   apiPromise ??= new Promise((resolve, reject) => {
     const script = document.createElement('script')
     script.src = 'https://w.soundcloud.com/player/api.js'
-    script.onload = () => resolve(window.SC)
-    script.onerror = () => {
+    const failed = () => {
+      clearTimeout(timeout)
+      script.remove()
       apiPromise = null
       reject(new Error('Could not load the SoundCloud player. Check your connection or ad blocker.'))
     }
+    const timeout = setTimeout(failed, WIDGET_API_TIMEOUT_MS)
+    script.onload = () => {
+      if (!window.SC?.Widget) {
+        failed()
+        return
+      }
+      clearTimeout(timeout)
+      resolve(window.SC)
+    }
+    script.onerror = failed
     document.head.appendChild(script)
   })
   return apiPromise

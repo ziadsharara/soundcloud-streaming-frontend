@@ -1,22 +1,45 @@
-const configuredBase = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '')
+const REQUEST_TIMEOUT_MS = 15000
+const configuredBase = (import.meta.env.VITE_API_BASE_URL || '/api').trim().replace(/\/$/, '')
+
+function responseMessage(res, data) {
+  if (data && typeof data === 'object' && (data.detail || data.message)) return data.detail || data.message
+  if (res.status === 404 && res.headers.get('x-vercel-error')) {
+    return 'The backend API is not connected to this deployment.'
+  }
+  return ''
+}
 
 async function request(path, { method = 'GET', body, headers = {} } = {}) {
-  const res = await fetch(`${configuredBase}${path}`, {
-    method,
-    headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), ...headers },
-    body: body ? JSON.stringify(body) : undefined,
-  })
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+  let res
+  try {
+    res = await fetch(`${configuredBase}${path}`, {
+      method,
+      headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), ...headers },
+      body: body ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    })
+  } catch (error) {
+    if (error?.name === 'AbortError') throw new Error('The backend API took too long to respond.')
+    throw new Error('The backend API could not be reached. Check the deployment URL and CORS settings.')
+  } finally {
+    clearTimeout(timeout)
+  }
+
   if (!res.ok) {
     let message = `Request failed (${res.status})`
     try {
       const data = await res.json()
-      message = data.detail || data.message || message
+      message = responseMessage(res, data) || message
     } catch {
-      // non-JSON error body
+      message = responseMessage(res) || message
     }
     throw new Error(message)
   }
-  return res.status === 204 ? null : res.json()
+  if (res.status === 204) return null
+  const contentType = res.headers.get('content-type') || ''
+  return contentType.includes('application/json') ? res.json() : null
 }
 
 export const api = {
@@ -39,7 +62,8 @@ export function soundCloudConnectUrl() {
 }
 
 export function webSocketUrl() {
-  if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL
+  const configuredSocket = import.meta.env.VITE_WS_URL?.trim()
+  if (configuredSocket) return configuredSocket.replace(/\/$/, '')
   const apiUrl = new URL(configuredBase, window.location.origin)
   const protocol = apiUrl.protocol === 'https:' ? 'wss:' : 'ws:'
   return `${protocol}//${apiUrl.host}/ws`

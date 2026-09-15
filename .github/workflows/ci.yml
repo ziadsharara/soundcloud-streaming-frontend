@@ -18,6 +18,7 @@ jobs:
           node-version: '20'
           cache: npm
       - run: npm ci
+      - run: npm test
       - run: npm run build
       - name: Build container
         run: docker build --tag soundcloud-streaming-frontend:${{ github.sha }} .

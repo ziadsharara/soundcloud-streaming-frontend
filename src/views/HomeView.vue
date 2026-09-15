@@ -5,6 +5,7 @@ import SoundCloudLibrary from '../components/SoundCloudLibrary.vue'
 import { api, getNickname, setHostToken, setNickname } from '../api'
 import { largeArtwork } from '../soundcloud'
 import { useSoundCloudAuth } from '../soundcloudAuth'
+import { parseRoomCode } from '../roomCode'
 
 const REFRESH_MS = 10000
 const router = useRouter()
@@ -18,6 +19,7 @@ const hostName = ref(getNickname())
 const creating = ref(false)
 const createError = ref('')
 const code = ref('')
+const joinError = ref('')
 const selectedSource = ref(null)
 const createCard = ref(null)
 let timer = null
@@ -56,8 +58,13 @@ async function createRoom() {
 }
 
 function joinByCode() {
-  const id = code.value.trim().split('/').filter(Boolean).pop()?.toUpperCase()
-  if (id) router.push({ name: 'room', params: { id } })
+  const id = parseRoomCode(code.value)
+  if (!id) {
+    joinError.value = 'Enter a valid six-character room code or invite link.'
+    return
+  }
+  joinError.value = ''
+  router.push({ name: 'room', params: { id } })
 }
 
 function queueSource(item) {
@@ -161,6 +168,7 @@ onBeforeUnmount(() => clearInterval(timer))
               <label for="code">Invite link or room code</label>
               <input id="code" v-model="code" class="mono" placeholder="e.g. K7QH2M" autocomplete="off" required />
             </div>
+            <p v-if="joinError" class="field-error">{{ joinError }}</p>
             <div class="join-preview"><span>01</span><i></i><span>02</span><i></i><span>♫</span></div>
             <button class="btn btn--soft btn--large btn--full" type="submit">Join room <span>→</span></button>
             <p class="privacy-note"><span>✓</span> No account needed for listeners</p>

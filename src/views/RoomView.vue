@@ -5,7 +5,7 @@ import SoundCloudPlayer from '../components/SoundCloudPlayer.vue'
 import SoundCloudLibrary from '../components/SoundCloudLibrary.vue'
 import { api, clearHostToken, getHostToken, getNickname, setNickname } from '../api'
 import { connectToRoom } from '../stomp'
-import { SOUNDCLOUD_URL, largeArtwork } from '../soundcloud'
+import { isSoundCloudUrl, largeArtwork } from '../soundcloud'
 import { useSoundCloudAuth } from '../soundcloudAuth'
 
 const props = defineProps({ id: { type: String, required: true } })
@@ -32,12 +32,14 @@ const player = ref(null)
 const playerUrl = ref('')
 const playerReady = ref(false)
 const playerError = ref('')
+const playerKey = ref(0)
 const tunedIn = ref(false)
 const volume = ref(80)
 
 const trackInput = ref('')
 const formError = ref('')
 let pendingAutoplay = false
+let pendingTrackUrl = ''
 let hostStarted = false
 
 const chat = ref([])
@@ -49,6 +51,9 @@ const copied = ref(false)
 let connection = null
 let timer = null
 let syncing = false
+let broadcasting = false
+let broadcastQueued = false
+let broadcastRetryTimer = null
 
 const statusLabel = computed(
   () => ({ connected: 'Connected', connecting: 'Connecting…', disconnected: 'Reconnecting…' })[status.value],
@@ -69,11 +74,13 @@ onMounted(async () => {
 
   // A host who reloads the page gets their last track back in the player (not auto-playing).
   if (isHost && playback.value?.trackUrl) playerUrl.value = playback.value.trackUrl
+  // Prime a listener's widget before their direct SoundCloud Play click.
+  if (!isHost && playback.value?.trackUrl) playerUrl.value = playback.value.trackUrl
   if (isHost && !playerUrl.value) {
     try {
       const queued = JSON.parse(window.sessionStorage.getItem('soundstream:queued-source'))
       window.sessionStorage.removeItem('soundstream:queued-source')
-      if (queued?.permalinkUrl && SOUNDCLOUD_URL.test(queued.permalinkUrl)) {
+      if (queued?.permalinkUrl && isSoundCloudUrl(queued.permalinkUrl)) {
         playerUrl.value = queued.permalinkUrl
       }
     } catch {
@@ -109,6 +116,8 @@ onBeforeUnmount(teardown)
 
 function teardown() {
   clearInterval(timer)
+  clearTimeout(broadcastRetryTimer)
+  broadcastQueued = false
   connection?.disconnect()
   connection = null
 }
@@ -119,6 +128,12 @@ function onPlayerReady() {
   playerReady.value = true
   playerError.value = ''
   player.value.setVolume(volume.value)
+  if (isHost && pendingTrackUrl) {
+    const url = pendingTrackUrl
+    pendingTrackUrl = ''
+    player.value.load(url, { autoPlay: true })
+    return
+  }
   if (isHost && pendingAutoplay) {
     pendingAutoplay = false
     player.value.play()
@@ -130,11 +145,17 @@ function onPlayerError(message) {
   playerError.value = message
 }
 
+function retryPlayer() {
+  playerError.value = ''
+  playerReady.value = false
+  playerKey.value += 1
+}
+
 // ---- Host ----
 
 function playTrack(sourceUrl) {
   const url = typeof sourceUrl === 'string' ? sourceUrl.trim() : trackInput.value.trim()
-  if (!SOUNDCLOUD_URL.test(url)) {
+  if (!isSoundCloudUrl(url)) {
     formError.value = 'Paste a link to a SoundCloud track or playlist.'
     return
   }
@@ -143,8 +164,10 @@ function playTrack(sourceUrl) {
   if (!playerUrl.value) {
     pendingAutoplay = true
     playerUrl.value = url
-  } else {
+  } else if (playerReady.value && player.value) {
     player.value.load(url, { autoPlay: true })
+  } else {
+    pendingTrackUrl = url
   }
   trackInput.value = ''
 }
@@ -153,15 +176,40 @@ function playLibraryItem(item) {
   if (item?.streamable && item.permalinkUrl) playTrack(item.permalinkUrl)
 }
 
-function onHostPlayerEvent(type) {
-  if (!isHost) return
+function onPlayerEvent(type) {
+  if (!isHost) {
+    if (type === 'play' && !tunedIn.value) {
+      tunedIn.value = true
+      syncToHost()
+    }
+    return
+  }
   if (type === 'play') hostStarted = true
   broadcastState()
+  clearTimeout(broadcastRetryTimer)
+  broadcastRetryTimer = setTimeout(broadcastState, 250)
 }
 
 async function broadcastState() {
   // Don't broadcast a restored-but-idle player; wait until the host actually presses play.
   if (!isHost || !hostStarted || !playerReady.value || !connection) return
+  if (broadcasting) {
+    broadcastQueued = true
+    return
+  }
+
+  broadcasting = true
+  try {
+    do {
+      broadcastQueued = false
+      await broadcastSnapshot()
+    } while (broadcastQueued && connection)
+  } finally {
+    broadcasting = false
+  }
+}
+
+async function broadcastSnapshot() {
   const [sound, position, paused] = await Promise.all([
     player.value.getCurrentSound(),
     player.value.getPosition(),
@@ -192,11 +240,6 @@ async function endStream() {
 
 // ---- Listener ----
 
-function tuneIn() {
-  tunedIn.value = true
-  if (playback.value?.trackUrl) playerUrl.value = playback.value.trackUrl
-}
-
 function expectedPosition(state) {
   if (!state.playing) return state.positionMs
   const serverNow = Date.now() - clockOffset
@@ -205,9 +248,9 @@ function expectedPosition(state) {
 
 async function syncToHost() {
   const state = playback.value
-  if (isHost || !tunedIn.value || !state?.trackUrl || syncing) return
+  if (isHost || !state?.trackUrl || syncing) return
   if (!playerUrl.value) {
-    playerUrl.value = state.trackUrl // first track after tuning in; onPlayerReady re-runs the sync
+    playerUrl.value = state.trackUrl // prime the widget; onPlayerReady re-runs the sync
     return
   }
   if (!playerReady.value) return
@@ -215,8 +258,9 @@ async function syncToHost() {
   syncing = true
   try {
     if (player.value.loadedUrl() !== state.trackUrl) {
-      await player.value.load(state.trackUrl, { autoPlay: state.playing })
+      await player.value.load(state.trackUrl, { autoPlay: tunedIn.value && state.playing })
     }
+    if (!tunedIn.value) return
     const paused = await player.value.isPaused()
     if (paused === null) return
     if (state.playing && paused) player.value.play()
@@ -333,31 +377,39 @@ async function copyLink() {
             @select="playLibraryItem"
           />
 
-          <section v-if="!isHost && !tunedIn" class="card tune-in">
-            <p class="muted">Your browser needs one click before it can play audio.</p>
-            <button class="btn btn--big" type="button" @click="tuneIn">▶ Tune in</button>
+          <section v-if="!isHost && !tunedIn && !playerReady" class="card tune-in">
+            <p v-if="!playback?.trackUrl" class="muted">Waiting for the host to choose the first track.</p>
+            <p v-else class="muted">Preparing the SoundCloud player…</p>
           </section>
 
           <section v-if="playerUrl" class="card player-card">
             <SoundCloudPlayer
+              :key="playerKey"
               ref="player"
               :initial-url="playerUrl"
+              :auto-play="isHost && pendingAutoplay"
               @ready="onPlayerReady"
-              @play="onHostPlayerEvent('play')"
-              @pause="onHostPlayerEvent('pause')"
-              @seek="onHostPlayerEvent('seek')"
-              @finish="onHostPlayerEvent('finish')"
+              @play="onPlayerEvent('play')"
+              @pause="onPlayerEvent('pause')"
+              @seek="onPlayerEvent('seek')"
+              @finish="onPlayerEvent('finish')"
               @error="onPlayerError"
             />
             <div class="volume">
               <label for="volume">Volume</label>
               <input id="volume" v-model.number="volume" type="range" min="0" max="100" />
             </div>
-            <p v-if="!isHost" class="hint">The host controls playback. You'll stay in sync automatically.</p>
+            <p v-if="!isHost && !tunedIn" class="hint">
+              Press the orange Play button in SoundCloud once to tune in. Your browser requires this direct click for audio.
+            </p>
+            <p v-else-if="!isHost" class="hint">The host controls playback. You'll stay in sync automatically.</p>
           </section>
 
           <p v-else-if="!isHost && tunedIn" class="muted">Tuned in. Music will start when the host plays something.</p>
-          <p v-if="playerError" class="notice notice--error">{{ playerError }}</p>
+          <div v-if="playerError" class="notice notice--error player-error">
+            <span>{{ playerError }}</span>
+            <button class="btn btn--ghost btn--compact" type="button" @click="retryPlayer">Retry player</button>
+          </div>
         </div>
 
         <aside class="card chat">

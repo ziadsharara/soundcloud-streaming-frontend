@@ -5,6 +5,7 @@ import { WIDGET_OPTIONS, embedUrl, loadWidgetApi } from '../soundcloud'
 const props = defineProps({
   // Only used for the first render; later tracks go through load() to keep the same widget.
   initialUrl: { type: String, required: true },
+  autoPlay: { type: Boolean, default: false },
 })
 const emit = defineEmits(['ready', 'play', 'pause', 'seek', 'finish', 'error'])
 
@@ -25,7 +26,7 @@ onMounted(async () => {
     return
   }
   // Render the iframe only after the API is loaded so the READY event can't be missed.
-  src.value = embedUrl(props.initialUrl)
+  src.value = embedUrl(props.initialUrl, props.autoPlay)
   await nextTick()
   widget = SC.Widget(frame.value)
   const { Events } = SC.Widget
