@@ -5,7 +5,7 @@ import { webSocketUrl } from './api'
  * Opens a STOMP connection for one room and wires its topics to callbacks.
  * Reconnects automatically; subscriptions are re-created on every connect.
  */
-export function connectToRoom(roomId, { onStatus, onPlayback, onListeners, onChat, onClosed }) {
+export function connectToRoom(roomId, { onStatus, onPlayback, onListeners, onChat, onClosed, onError }) {
   const client = new Client({ brokerURL: webSocketUrl(), reconnectDelay: 3000 })
   const json = (handler) => (message) => handler?.(JSON.parse(message.body))
 
@@ -17,8 +17,15 @@ export function connectToRoom(roomId, { onStatus, onPlayback, onListeners, onCha
     client.subscribe(`/topic/rooms/${roomId}/playback`, json(onPlayback))
     onStatus?.('connected')
   }
-  client.onWebSocketClose = () => onStatus?.('disconnected')
-  client.onStompError = (frame) => console.error('STOMP error', frame.headers.message, frame.body)
+  client.onWebSocketClose = () => {
+    onStatus?.('disconnected')
+    onError?.('The live connection was interrupted. Retrying automatically…')
+  }
+  client.onWebSocketError = () => onError?.('The live connection failed. Retrying automatically…')
+  client.onStompError = (frame) => {
+    onError?.(frame.headers.message || 'The room server rejected the live connection.')
+    console.error('STOMP error', frame.headers.message, frame.body)
+  }
   client.activate()
 
   const publish = (destination, body) => {
@@ -28,6 +35,11 @@ export function connectToRoom(roomId, { onStatus, onPlayback, onListeners, onCha
   return {
     publishPlayback: (state) => publish(`/app/rooms/${roomId}/playback`, state),
     sendChat: (message) => publish(`/app/rooms/${roomId}/chat`, message),
+    reconnect: async () => {
+      onStatus?.('connecting')
+      await client.deactivate({ force: true })
+      client.activate()
+    },
     disconnect: () => client.deactivate(),
   }
 }

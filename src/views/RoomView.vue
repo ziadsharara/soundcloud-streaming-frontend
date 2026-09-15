@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import SoundCloudPlayer from '../components/SoundCloudPlayer.vue'
 import { api, clearHostToken, getHostToken, getNickname, setNickname } from '../api'
+import { selectLatestPlayback } from '../playback'
 import { connectToRoom } from '../stomp'
 import {
   isSoundCloudSetUrl,
@@ -25,6 +26,7 @@ const isHost = Boolean(hostToken)
 
 const room = ref(null)
 const error = ref('')
+const realtimeError = ref('')
 const closed = ref(false)
 const status = ref('connecting')
 const listeners = ref(0)
@@ -37,6 +39,7 @@ const playerReady = ref(false)
 const playerError = ref('')
 const playerKey = ref(0)
 const tunedIn = ref(false)
+const resyncing = ref(false)
 const volume = ref(80)
 
 const trackInput = ref('')
@@ -51,7 +54,8 @@ const chat = ref([])
 const chatText = ref('')
 const chatList = ref(null)
 const nickname = ref(getNickname())
-const copied = ref(false)
+const inviteFeedback = ref('')
+const canNativeShare = typeof navigator.share === 'function'
 
 let connection = null
 let timer = null
@@ -59,12 +63,16 @@ let syncing = false
 let broadcasting = false
 let broadcastQueued = false
 let broadcastRetryTimer = null
+let inviteFeedbackTimer = null
 
 const statusLabel = computed(
   () => ({ connected: 'Connected', connecting: 'Connecting…', disconnected: 'Reconnecting…' })[status.value],
 )
 const artwork = computed(() => largeArtwork(playback.value?.artworkUrl))
 const activeQueueUrl = computed(() => trackQueue.value[activeQueueIndex.value] || '')
+const inviteButtonLabel = computed(
+  () => inviteFeedback.value || (canNativeShare ? 'Share invite' : 'Copy invite link'),
+)
 
 watch(trackQueue, persistQueue, { deep: true })
 
@@ -104,8 +112,13 @@ onMounted(async () => {
   connection = connectToRoom(props.id, {
     onStatus: (s) => {
       status.value = s
-      if (s === 'connected' && isHost) broadcastState()
+      if (s === 'connected') {
+        realtimeError.value = ''
+        if (isHost) broadcastState()
+        else refreshPlaybackState()
+      }
     },
+    onError: (message) => (realtimeError.value = message),
     onPlayback: (state) => {
       playback.value = state
       syncToHost()
@@ -130,6 +143,7 @@ onBeforeUnmount(teardown)
 function teardown() {
   clearInterval(timer)
   clearTimeout(broadcastRetryTimer)
+  clearTimeout(inviteFeedbackTimer)
   broadcastQueued = false
   connection?.disconnect()
   connection = null
@@ -333,7 +347,23 @@ function expectedPosition(state) {
   return state.positionMs + Math.max(0, serverNow - state.serverTime)
 }
 
-async function syncToHost() {
+async function refreshPlaybackState(forceSync = false) {
+  if (isHost || closed.value) return
+  try {
+    const data = await api.getRoom(props.id)
+    if (closed.value) return
+    room.value = data
+    listeners.value = data.listeners
+    clockOffset = Date.now() - data.serverNow
+    // A playback event can arrive while this request is in flight; never replace it with an older snapshot.
+    playback.value = selectLatestPlayback(playback.value, data.playback)
+    await syncToHost(forceSync)
+  } catch (e) {
+    realtimeError.value = `Connected, but the latest playback state could not be loaded. ${e.message}`
+  }
+}
+
+async function syncToHost(force = false) {
   const state = playback.value
   if (isHost || !state?.trackUrl || syncing) return
   if (!playerUrl.value) {
@@ -355,9 +385,28 @@ async function syncToHost() {
 
     const target = expectedPosition(state)
     const position = await player.value.getPosition()
-    if (position !== null && Math.abs(position - target) > DRIFT_MS) player.value.seekTo(target)
+    if (position !== null && (force || Math.abs(position - target) > DRIFT_MS)) player.value.seekTo(target)
   } finally {
     syncing = false
+  }
+}
+
+async function resyncNow() {
+  if (resyncing.value) return
+  resyncing.value = true
+  try {
+    await refreshPlaybackState(true)
+  } finally {
+    resyncing.value = false
+  }
+}
+
+async function retryConnection() {
+  realtimeError.value = ''
+  try {
+    await connection?.reconnect()
+  } catch {
+    realtimeError.value = 'Could not restart the live connection. Retrying automatically…'
   }
 }
 
@@ -377,13 +426,33 @@ async function scrollChatToBottom() {
   if (chatList.value) chatList.value.scrollTop = chatList.value.scrollHeight
 }
 
-async function copyLink() {
+function showInviteFeedback(message) {
+  inviteFeedback.value = message
+  clearTimeout(inviteFeedbackTimer)
+  inviteFeedbackTimer = setTimeout(() => (inviteFeedback.value = ''), 2000)
+}
+
+async function shareInvite() {
+  const url = `${window.location.origin}/room/${props.id}`
+  if (canNativeShare) {
+    try {
+      await navigator.share({
+        title: room.value?.name || 'SoundStream room',
+        text: `Join ${room.value?.hostName || 'the host'} on SoundStream.`,
+        url,
+      })
+      showInviteFeedback('Invite shared ✓')
+      return
+    } catch (e) {
+      if (e?.name === 'AbortError') return
+      // Fall back to copying when native sharing is unavailable or fails.
+    }
+  }
   try {
-    await navigator.clipboard.writeText(`${window.location.origin}/room/${props.id}`)
-    copied.value = true
-    setTimeout(() => (copied.value = false), 2000)
+    await navigator.clipboard.writeText(url)
+    showInviteFeedback('Link copied ✓')
   } catch {
-    window.prompt('Copy this invite link:', `${window.location.origin}/room/${props.id}`)
+    window.prompt('Copy this invite link:', url)
   }
 }
 </script>
@@ -414,8 +483,8 @@ async function copyLink() {
           </div>
         </div>
         <div class="actions">
-          <button class="btn btn--ghost" type="button" @click="copyLink">
-            {{ copied ? 'Link copied ✓' : 'Copy invite link' }}
+          <button class="btn btn--ghost" type="button" @click="shareInvite">
+            {{ inviteButtonLabel }}
           </button>
           <button v-if="isHost" class="btn btn--danger" type="button" @click="endStream">End stream</button>
           <RouterLink v-else class="btn btn--ghost" to="/">Leave</RouterLink>
@@ -423,6 +492,10 @@ async function copyLink() {
       </header>
 
       <p v-if="error" class="notice notice--error">{{ error }}</p>
+      <div v-if="realtimeError" class="notice notice--error player-error" role="alert">
+        <span>{{ realtimeError }}</span>
+        <button class="btn btn--ghost btn--compact" type="button" @click="retryConnection">Reconnect now</button>
+      </div>
 
       <div class="room-grid">
         <div class="stack">
@@ -496,9 +569,20 @@ async function copyLink() {
               @finish="onPlayerEvent('finish')"
               @error="onPlayerError"
             />
-            <div class="volume">
-              <label for="volume">Volume</label>
-              <input id="volume" v-model.number="volume" type="range" min="0" max="100" />
+            <div class="player-controls">
+              <div class="volume">
+                <label for="volume">Volume</label>
+                <input id="volume" v-model.number="volume" type="range" min="0" max="100" />
+              </div>
+              <button
+                v-if="!isHost && tunedIn"
+                class="btn btn--ghost btn--compact"
+                type="button"
+                :disabled="resyncing"
+                @click="resyncNow"
+              >
+                {{ resyncing ? 'Syncing…' : 'Sync now' }}
+              </button>
             </div>
             <p v-if="!isHost && !tunedIn" class="hint">
               Press the orange Play button in SoundCloud once to tune in. Your browser requires this direct click for audio.

@@ -320,7 +320,9 @@ input:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px
 .np-text p { margin: 4px 0 0; }
 .now-playing > .live-badge { position: absolute; top: 18px; right: 18px; }
 .sc-frame { display: block; width: 100%; height: 300px; border: 0; border-radius: 12px; }
-.volume { display: flex; align-items: center; gap: 12px; margin-top: 14px; }
+.player-controls { display: flex; align-items: center; gap: 12px; margin-top: 14px; }
+.player-controls .volume { flex: 1; min-width: 180px; }
+.volume { display: flex; align-items: center; gap: 12px; }
 .volume label { margin: 0; }
 .volume input { flex: 1; accent-color: var(--accent); }
 .tune-in { text-align: center; }
@@ -415,6 +417,7 @@ input:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px
   .queue-controls { width: 100%; }
   .queue-controls .btn { flex: 1; }
   .queue-form-actions .btn { width: 100%; }
+  .player-controls { align-items: stretch; flex-direction: column; }
   .footer { grid-template-columns: 1fr auto; padding-block: 25px; }
   .footer p { display: none; }
 }
