@@ -8,7 +8,8 @@ Set these values on the AWS service:
 
 ```text
 PORT=8080
-FRONTEND_ORIGINS=https://soundcloud-streaming-frontend.vercel.app
+FRONTEND_ORIGINS=https://soundstreaming.vercel.app
+PUBLIC_FRONTEND_ORIGIN=https://soundstreaming.vercel.app
 ```
 
 The public backend must use HTTPS. Verify it before configuring Vercel:
@@ -28,14 +29,13 @@ Production uses a same-origin Vercel rewrite so every Vercel alias can reach AWS
 VITE_API_BASE_URL=/api
 ```
 
-The deployed AWS service currently allows its original Vercel hostname for WebSocket handshakes. The public `soundstreaming.vercel.app` domain therefore uses the restricted `/realtime-bridge` route on that original hostname. Keep these values set until AWS is redeployed with the new domain in its allowed origins:
+The browser connects directly to the backend WebSocket. Keep this value set to the public backend endpoint:
 
 ```text
 VITE_WS_URL=wss://<aws-backend-host>/ws
-VITE_WS_BRIDGE_ORIGIN=https://soundcloud-streaming-frontend.vercel.app
 ```
 
-Redeploy after changing either variable; Vite embeds them at build time.
+Deploy the backend first so it accepts the canonical origin, then redeploy the frontend. Vite embeds the frontend variables at build time.
 
 ## 3. Production smoke test
 

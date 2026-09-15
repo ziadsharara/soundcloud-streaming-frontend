@@ -6,14 +6,6 @@
       "destination": "https://so-adb7dea29c744021908d6f9ec47e35c6.ecs.us-east-1.on.aws/api/:path*"
     },
     {
-      "source": "/ws",
-      "destination": "https://so-adb7dea29c744021908d6f9ec47e35c6.ecs.us-east-1.on.aws/ws"
-    },
-    {
-      "source": "/realtime-bridge",
-      "destination": "/index.html"
-    },
-    {
       "source": "/room/(.*)",
       "destination": "/index.html"
     }
