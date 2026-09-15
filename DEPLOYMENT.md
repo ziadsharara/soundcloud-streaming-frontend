@@ -28,10 +28,11 @@ Production uses a same-origin Vercel rewrite so every Vercel alias can reach AWS
 VITE_API_BASE_URL=/api
 ```
 
-The WebSocket URL is derived as `wss://<vercel-host>/ws` and proxied to AWS by `vercel.json`. For deployments that connect directly to a separately configured backend, set:
+The deployed AWS service currently allows its original Vercel hostname for WebSocket handshakes. The public `soundstreaming.vercel.app` domain therefore uses the restricted `/realtime-bridge` route on that original hostname. Keep these values set until AWS is redeployed with the new domain in its allowed origins:
 
 ```text
-VITE_WS_URL=wss://<websocket-host>/ws
+VITE_WS_URL=wss://<aws-backend-host>/ws
+VITE_WS_BRIDGE_ORIGIN=https://soundcloud-streaming-frontend.vercel.app
 ```
 
 Redeploy after changing either variable; Vite embeds them at build time.

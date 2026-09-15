@@ -7,7 +7,9 @@ const { theme, toggleTheme } = useTheme()
 </script>
 
 <template>
-  <div class="app-shell">
+  <RouterView v-if="route.meta.realtimeBridge" />
+
+  <div v-else class="app-shell">
     <header class="topbar">
       <RouterLink to="/" class="brand" aria-label="SoundStream home">
         <span class="brand-mark" aria-hidden="true">

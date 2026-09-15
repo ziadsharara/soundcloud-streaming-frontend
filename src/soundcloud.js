@@ -29,6 +29,33 @@ export function isSoundCloudUrl(value) {
   }
 }
 
+export function parseSoundCloudUrls(value) {
+  return String(value || '')
+    .split(/\r?\n/)
+    .map((url) => url.trim())
+    .filter(Boolean)
+}
+
+export function isSoundCloudSetUrl(value) {
+  if (!isSoundCloudUrl(value)) return false
+  try {
+    return new URL(value).pathname.toLowerCase().includes('/sets/')
+  } catch {
+    return false
+  }
+}
+
+export function soundCloudUrlLabel(value) {
+  try {
+    const url = new URL(value)
+    const parts = url.pathname.split('/').filter(Boolean).map((part) => decodeURIComponent(part))
+    const labelParts = parts.includes('sets') ? parts.slice(-1) : parts.slice(-2)
+    return labelParts.join(' · ').replaceAll('-', ' ') || 'SoundCloud link'
+  } catch {
+    return 'SoundCloud link'
+  }
+}
+
 let apiPromise = null
 const WIDGET_API_TIMEOUT_MS = 8000
 

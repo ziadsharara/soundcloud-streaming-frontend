@@ -4,7 +4,13 @@ import { useRouter } from 'vue-router'
 import SoundCloudPlayer from '../components/SoundCloudPlayer.vue'
 import { api, clearHostToken, getHostToken, getNickname, setNickname } from '../api'
 import { connectToRoom } from '../stomp'
-import { isSoundCloudUrl, largeArtwork } from '../soundcloud'
+import {
+  isSoundCloudSetUrl,
+  isSoundCloudUrl,
+  largeArtwork,
+  parseSoundCloudUrls,
+  soundCloudUrlLabel,
+} from '../soundcloud'
 
 const props = defineProps({ id: { type: String, required: true } })
 const router = useRouter()
@@ -35,6 +41,8 @@ const volume = ref(80)
 
 const trackInput = ref('')
 const formError = ref('')
+const trackQueue = ref(readQueue())
+const activeQueueIndex = ref(-1)
 let pendingAutoplay = false
 let pendingTrackUrl = ''
 let hostStarted = false
@@ -56,6 +64,9 @@ const statusLabel = computed(
   () => ({ connected: 'Connected', connecting: 'Connecting…', disconnected: 'Reconnecting…' })[status.value],
 )
 const artwork = computed(() => largeArtwork(playback.value?.artworkUrl))
+const activeQueueUrl = computed(() => trackQueue.value[activeQueueIndex.value] || '')
+
+watch(trackQueue, persistQueue, { deep: true })
 
 onMounted(async () => {
   try {
@@ -70,7 +81,10 @@ onMounted(async () => {
   }
 
   // A host who reloads the page gets their last track back in the player (not auto-playing).
-  if (isHost && playback.value?.trackUrl) playerUrl.value = playback.value.trackUrl
+  if (isHost && playback.value?.trackUrl) {
+    playerUrl.value = playback.value.trackUrl
+    activeQueueIndex.value = trackQueue.value.indexOf(playback.value.trackUrl)
+  }
   // Prime a listener's widget before their direct SoundCloud Play click.
   if (!isHost && playback.value?.trackUrl) playerUrl.value = playback.value.trackUrl
   if (isHost && !playerUrl.value) {
@@ -78,6 +92,7 @@ onMounted(async () => {
       const queued = JSON.parse(window.sessionStorage.getItem('soundstream:queued-source'))
       window.sessionStorage.removeItem('soundstream:queued-source')
       if (queued?.permalinkUrl && isSoundCloudUrl(queued.permalinkUrl)) {
+        activeQueueIndex.value = addToQueue(queued.permalinkUrl)
         pendingAutoplay = true
         playerUrl.value = queued.permalinkUrl
       }
@@ -151,8 +166,52 @@ function retryPlayer() {
 
 // ---- Host ----
 
-function playTrack(sourceUrl) {
-  const url = typeof sourceUrl === 'string' ? sourceUrl.trim() : trackInput.value.trim()
+function readQueue() {
+  if (!isHost) return []
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(`soundstream:queue:${props.id}`))
+    return Array.isArray(saved) ? saved.filter(isSoundCloudUrl).slice(0, 100) : []
+  } catch {
+    return []
+  }
+}
+
+function persistQueue() {
+  if (!isHost) return
+  try {
+    window.localStorage.setItem(`soundstream:queue:${props.id}`, JSON.stringify(trackQueue.value))
+  } catch {
+    // Private browsing can block storage; the in-memory queue still works.
+  }
+}
+
+function addToQueue(url) {
+  const existing = trackQueue.value.indexOf(url)
+  if (existing >= 0) return existing
+  trackQueue.value.push(url)
+  return trackQueue.value.length - 1
+}
+
+function addUrls(playFirst) {
+  const urls = parseSoundCloudUrls(trackInput.value)
+  if (!urls.length) {
+    formError.value = 'Paste at least one SoundCloud song, playlist, or album URL.'
+    return
+  }
+  const invalidIndex = urls.findIndex((url) => !isSoundCloudUrl(url))
+  if (invalidIndex >= 0) {
+    formError.value = `Line ${invalidIndex + 1} is not a valid public SoundCloud URL.`
+    return
+  }
+  formError.value = ''
+  const firstIndex = addToQueue(urls[0])
+  urls.slice(1).forEach(addToQueue)
+  trackInput.value = ''
+  if (playFirst) playQueueItem(firstIndex)
+}
+
+function loadSource(sourceUrl) {
+  const url = sourceUrl.trim()
   if (!isSoundCloudUrl(url)) {
     formError.value = 'Paste a link to a SoundCloud song, playlist, or album.'
     return
@@ -167,7 +226,32 @@ function playTrack(sourceUrl) {
   } else {
     pendingTrackUrl = url
   }
-  trackInput.value = ''
+}
+
+function playQueueItem(index) {
+  const url = trackQueue.value[index]
+  if (!url) return
+  activeQueueIndex.value = index
+  loadSource(url)
+}
+
+function playNext() {
+  if (activeQueueIndex.value < trackQueue.value.length - 1) playQueueItem(activeQueueIndex.value + 1)
+}
+
+function playPrevious() {
+  if (activeQueueIndex.value > 0) playQueueItem(activeQueueIndex.value - 1)
+}
+
+function removeQueueItem(index) {
+  trackQueue.value.splice(index, 1)
+  if (index < activeQueueIndex.value) activeQueueIndex.value -= 1
+  else if (index === activeQueueIndex.value) activeQueueIndex.value = -1
+}
+
+function clearQueue() {
+  trackQueue.value = []
+  activeQueueIndex.value = -1
 }
 
 function onPlayerEvent(type) {
@@ -179,6 +263,15 @@ function onPlayerEvent(type) {
     return
   }
   if (type === 'play') hostStarted = true
+  if (
+    type === 'finish' &&
+    activeQueueIndex.value >= 0 &&
+    !isSoundCloudSetUrl(activeQueueUrl.value) &&
+    activeQueueIndex.value < trackQueue.value.length - 1
+  ) {
+    playNext()
+    return
+  }
   broadcastState()
   clearTimeout(broadcastRetryTimer)
   broadcastRetryTimer = setTimeout(broadcastState, 250)
@@ -348,20 +441,42 @@ async function copyLink() {
             <span v-if="playback?.playing" class="live-badge">LIVE</span>
           </section>
 
-          <form v-if="isHost" class="card" @submit.prevent="playTrack">
-            <label for="track-url">SoundCloud song, playlist, or album link</label>
-            <div class="row">
-              <input
+          <form v-if="isHost" class="card queue-form" @submit.prevent="addUrls(true)">
+            <label for="track-url">SoundCloud songs, playlists, or albums</label>
+            <textarea
                 id="track-url"
                 v-model="trackInput"
-                placeholder="https://soundcloud.com/artist/track"
+                rows="3"
+                placeholder="Paste one SoundCloud URL per line"
                 autocomplete="off"
-              />
-              <button class="btn" type="submit">Play for everyone</button>
+              ></textarea>
+            <div class="queue-form-actions">
+              <button class="btn" type="submit">Play first + queue all</button>
+              <button class="btn btn--ghost" type="button" @click="addUrls(false)">Add to queue</button>
             </div>
             <p v-if="formError" class="field-error">{{ formError }}</p>
-            <p class="hint">Play, pause, seek or skip in the player below. Listeners follow along automatically.</p>
+            <p class="hint">Paste several links at once. Playlists and albums continue through their own SoundCloud track list.</p>
           </form>
+
+          <section v-if="isHost && trackQueue.length" class="card host-queue">
+            <div class="queue-heading">
+              <div><p class="eyebrow">Up next</p><h3>Room queue <span>{{ trackQueue.length }}</span></h3></div>
+              <div class="queue-controls">
+                <button class="btn btn--ghost btn--compact" type="button" :disabled="activeQueueIndex <= 0" @click="playPrevious">Previous</button>
+                <button class="btn btn--ghost btn--compact" type="button" :disabled="activeQueueIndex < 0 || activeQueueIndex >= trackQueue.length - 1" @click="playNext">Next</button>
+                <button class="queue-clear" type="button" @click="clearQueue">Clear</button>
+              </div>
+            </div>
+            <ol class="queue-list">
+              <li v-for="(url, index) in trackQueue" :key="url" :class="{ active: index === activeQueueIndex }">
+                <button class="queue-play" type="button" @click="playQueueItem(index)">
+                  <span>{{ index === activeQueueIndex ? '▶' : index + 1 }}</span>
+                  <span><strong>{{ soundCloudUrlLabel(url) }}</strong><small>{{ isSoundCloudSetUrl(url) ? 'Playlist or album' : 'Song or share link' }}</small></span>
+                </button>
+                <button class="queue-remove" type="button" :aria-label="`Remove ${soundCloudUrlLabel(url)} from queue`" @click="removeQueueItem(index)">×</button>
+              </li>
+            </ol>
+          </section>
 
           <section v-if="!isHost && !tunedIn && !playerReady" class="card tune-in">
             <p v-if="!playback?.trackUrl" class="muted">Waiting for the host to choose the first track.</p>
