@@ -1,4 +1,7 @@
-const apiBase = process.env.VITE_API_BASE_URL?.trim()
+import { loadEnv } from 'vite'
+
+const productionEnv = loadEnv('production', process.cwd(), '')
+const apiBase = (process.env.VITE_API_BASE_URL || productionEnv.VITE_API_BASE_URL)?.trim()
 
 if (process.env.VERCEL && (!apiBase || !/^https:\/\/[^/]+(?:\/.*)?$/.test(apiBase))) {
   console.error([

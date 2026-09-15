@@ -35,7 +35,7 @@ New SoundCloud API application registration requires an Artist Pro account. Do n
 
 ## 3. Vercel environment
 
-Add this production environment variable to the frontend project:
+The current AWS URL is committed in `.env.production`. To point a Vercel project at a different backend, override it with this production environment variable:
 
 ```text
 VITE_API_BASE_URL=https://<aws-backend-host>/api
