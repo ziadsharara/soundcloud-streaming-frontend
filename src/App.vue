@@ -1,11 +1,9 @@
 <script setup>
 import { useRoute } from 'vue-router'
 import { useTheme } from './theme'
-import { useSoundCloudAuth } from './soundcloudAuth'
 
 const route = useRoute()
 const { theme, toggleTheme } = useTheme()
-const { profile, configured, loading, connect, disconnect } = useSoundCloudAuth()
 </script>
 
 <template>
@@ -35,16 +33,7 @@ const { profile, configured, loading, connect, disconnect } = useSoundCloudAuth(
           <svg v-else viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" /></svg>
         </button>
 
-        <div v-if="profile" class="profile-menu">
-          <img v-if="profile.avatarUrl" :src="profile.avatarUrl" alt="" />
-          <span>{{ profile.username }}</span>
-          <button type="button" title="Disconnect SoundCloud" aria-label="Disconnect SoundCloud" @click="disconnect">×</button>
-        </div>
-        <button v-else class="btn btn--compact" type="button" :disabled="loading || configured === false" @click="connect">
-          <svg class="button-icon soundcloud-icon" viewBox="0 0 28 16" aria-hidden="true"><path d="M12.4 2.2A6.3 6.3 0 0 1 24.2 6a4.6 4.6 0 1 1-.3 9.2H12.4zM9.9 4.8h1.2v10.4H9.9zm-2.4 2h1.2v8.4H7.5zm-2.4 1.6h1.2v6.8H5.1zm-2.4 1.4h1.2v5.4H2.7zM.3 11h1.2v4.2H.3z" /></svg>
-          <span class="desktop-only">Connect SoundCloud</span>
-          <span class="mobile-only">Connect</span>
-        </button>
+        <a class="btn btn--compact" href="/#start">Start a room</a>
       </div>
     </header>
 

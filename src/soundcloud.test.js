@@ -4,6 +4,8 @@ import { embedUrl, isSoundCloudUrl, largeArtwork } from './soundcloud'
 describe('SoundCloud helpers', () => {
   it.each([
     'https://soundcloud.com/artist/track',
+    'https://soundcloud.com/artist/sets/public-playlist',
+    'https://soundcloud.com/artist/sets/public-album',
     'https://www.soundcloud.com/artist/track',
     'https://m.soundcloud.com/artist/track',
     'https://on.soundcloud.com/AbCdEf',

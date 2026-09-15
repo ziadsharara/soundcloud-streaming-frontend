@@ -48,17 +48,6 @@ export const api = {
   createRoom: (name, hostName) => request('/rooms', { method: 'POST', body: { name, hostName } }),
   closeRoom: (id, hostToken) =>
     request(`/rooms/${encodeURIComponent(id)}`, { method: 'DELETE', headers: { 'X-Host-Token': hostToken } }),
-  soundCloudConfig: () => request('/auth/soundcloud/config'),
-  soundCloudSession: (sessionId) =>
-    request('/auth/soundcloud/session', { headers: { Authorization: `Bearer ${sessionId}` } }),
-  soundCloudLibrary: (sessionId) =>
-    request('/soundcloud/library', { headers: { Authorization: `Bearer ${sessionId}` } }),
-  disconnectSoundCloud: (sessionId) =>
-    request('/auth/soundcloud/session', { method: 'DELETE', headers: { Authorization: `Bearer ${sessionId}` } }),
-}
-
-export function soundCloudConnectUrl() {
-  return `${configuredBase}/auth/soundcloud/start?returnTo=${encodeURIComponent(window.location.origin)}`
 }
 
 export function webSocketUrl() {

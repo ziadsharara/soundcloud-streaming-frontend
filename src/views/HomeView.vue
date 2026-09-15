@@ -1,15 +1,12 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import SoundCloudLibrary from '../components/SoundCloudLibrary.vue'
 import { api, getNickname, setHostToken, setNickname } from '../api'
-import { largeArtwork } from '../soundcloud'
-import { useSoundCloudAuth } from '../soundcloudAuth'
+import { isSoundCloudUrl, largeArtwork } from '../soundcloud'
 import { parseRoomCode } from '../roomCode'
 
 const REFRESH_MS = 10000
 const router = useRouter()
-const { profile, configured, error: authError, connect } = useSoundCloudAuth()
 
 const rooms = ref([])
 const loading = ref(true)
@@ -18,15 +15,15 @@ const roomName = ref('')
 const hostName = ref(getNickname())
 const creating = ref(false)
 const createError = ref('')
+const sourceUrl = ref('')
 const code = ref('')
 const joinError = ref('')
-const selectedSource = ref(null)
-const createCard = ref(null)
 let timer = null
 
 async function refresh() {
   try {
-    rooms.value = await api.listRooms()
+    const result = await api.listRooms()
+    rooms.value = Array.isArray(result) ? result : []
     listError.value = ''
   } catch (e) {
     listError.value = e.message
@@ -37,16 +34,21 @@ async function refresh() {
 
 async function createRoom() {
   createError.value = ''
+  const url = sourceUrl.value.trim()
+  if (url && !isSoundCloudUrl(url)) {
+    createError.value = 'Paste a valid SoundCloud song, playlist, or album URL.'
+    return
+  }
   creating.value = true
   try {
     const { room, hostToken } = await api.createRoom(roomName.value.trim(), hostName.value.trim())
     setHostToken(room.id, hostToken)
     setNickname(hostName.value.trim())
-    if (selectedSource.value) {
+    if (url) {
       try {
-        window.sessionStorage.setItem('soundstream:queued-source', JSON.stringify(selectedSource.value))
+        window.sessionStorage.setItem('soundstream:queued-source', JSON.stringify({ permalinkUrl: url }))
       } catch {
-        // The host can still pick the item again inside the room.
+        // The host can still paste the link again inside the room.
       }
     }
     router.push({ name: 'room', params: { id: room.id } })
@@ -67,12 +69,6 @@ function joinByCode() {
   router.push({ name: 'room', params: { id } })
 }
 
-function queueSource(item) {
-  selectedSource.value = item
-  if (!roomName.value) roomName.value = `${item.title} live`
-  createCard.value?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-}
-
 onMounted(() => {
   refresh()
   timer = setInterval(refresh, REFRESH_MS)
@@ -87,7 +83,7 @@ onBeforeUnmount(() => clearInterval(timer))
         <div class="hero-kicker"><span></span> Live listening rooms</div>
         <h1>Your SoundCloud.<br /><em>One room. One moment.</em></h1>
         <p>
-          Host a live session from your playlists and likes. Share one link, press play once, and everyone hears the same track at the same time.
+          Paste a public SoundCloud song, playlist, or album. Share one room link, press play once, and everyone hears it at the same time.
         </p>
         <div class="hero-actions">
           <a class="btn btn--large" href="#start">Start a room <span>↗</span></a>
@@ -134,7 +130,7 @@ onBeforeUnmount(() => clearInterval(timer))
         </div>
 
         <div class="launch-grid">
-          <form ref="createCard" class="card launch-card launch-card--primary" @submit.prevent="createRoom">
+          <form class="card launch-card launch-card--primary" @submit.prevent="createRoom">
             <div class="card-icon card-icon--orange">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8.5 16.5a6 6 0 0 1 0-9m7 0a6 6 0 0 1 0 9M5.5 19.5a10 10 0 0 1 0-15m13 0a10 10 0 0 1 0 15M12 12h.01" /></svg>
             </div>
@@ -147,11 +143,16 @@ onBeforeUnmount(() => clearInterval(timer))
               <label for="host-name">Your display name</label>
               <input id="host-name" v-model="hostName" placeholder="DJ you" maxlength="40" required />
             </div>
-            <div v-if="selectedSource" class="queued-source">
-              <img v-if="selectedSource.artworkUrl" :src="largeArtwork(selectedSource.artworkUrl)" alt="" />
-              <span v-else>♫</span>
-              <div><small>Ready to play</small><strong>{{ selectedSource.title }}</strong></div>
-              <button type="button" aria-label="Remove queued music" @click="selectedSource = null">×</button>
+            <div class="field-group">
+              <label for="source-url">SoundCloud song, playlist, or album URL <span class="muted">(optional)</span></label>
+              <input
+                id="source-url"
+                v-model="sourceUrl"
+                type="url"
+                placeholder="https://soundcloud.com/artist/song-or-set"
+                autocomplete="url"
+              />
+              <p class="hint">Only public SoundCloud links are supported. You can also paste one after entering the room.</p>
             </div>
             <p v-if="createError" class="field-error">{{ createError }}</p>
             <button class="btn btn--large btn--full" type="submit" :disabled="creating">
@@ -178,20 +179,16 @@ onBeforeUnmount(() => clearInterval(timer))
     </section>
 
     <section class="page library-section">
-      <SoundCloudLibrary v-if="profile" @select="queueSource" />
-      <div v-else class="connect-banner">
+      <div class="connect-banner public-link-banner">
         <div class="connect-cloud" aria-hidden="true">
           <svg viewBox="0 0 28 16"><path d="M12.4 2.2A6.3 6.3 0 0 1 24.2 6a4.6 4.6 0 1 1-.3 9.2H12.4zM9.9 4.8h1.2v10.4H9.9zm-2.4 2h1.2v8.4H7.5zm-2.4 1.6h1.2v6.8H5.1zm-2.4 1.4h1.2v5.4H2.7zM.3 11h1.2v4.2H.3z" /></svg>
         </div>
         <div>
-          <p class="eyebrow">Your music is waiting</p>
-          <h2>Bring your SoundCloud library</h2>
-          <p>Connect once to see your playlists, liked tracks, and liked playlists directly in the streaming portal.</p>
-          <p v-if="authError" class="field-error">{{ authError }}</p>
+          <p class="eyebrow">No account required</p>
+          <h2>Stream from a public SoundCloud link</h2>
+          <p>Use a song, playlist, album, or SoundCloud share link. Listeners only need the room URL.</p>
         </div>
-        <button class="btn btn--light btn--large" type="button" :disabled="configured === false" @click="connect">
-          {{ configured === false ? 'API setup required' : 'Connect SoundCloud' }}
-        </button>
+        <a class="btn btn--light btn--large" href="#start">Paste a SoundCloud URL</a>
       </div>
     </section>
 
@@ -223,7 +220,7 @@ onBeforeUnmount(() => clearInterval(timer))
       <div class="page">
         <div class="section-heading section-heading--center"><p class="eyebrow">How it works</p><h2>Three steps. Zero delay drama.</h2></div>
         <div class="steps-grid">
-          <article><span>1</span><div class="step-icon">♬</div><h3>Pick the soundtrack</h3><p>Choose a playlist, a liked track, or paste any playable SoundCloud URL.</p></article>
+          <article><span>1</span><div class="step-icon">♬</div><h3>Paste the soundtrack</h3><p>Use a public SoundCloud song, playlist, album, or share URL.</p></article>
           <article><span>2</span><div class="step-icon">↗</div><h3>Share one link</h3><p>Friends join from any browser. They do not need a SoundStream account.</p></article>
           <article><span>3</span><div class="step-icon">≋</div><h3>Stay in sync</h3><p>Play, pause, seek, or skip. Every listener follows the host automatically.</p></article>
         </div>

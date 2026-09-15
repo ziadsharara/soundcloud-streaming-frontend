@@ -2,15 +2,12 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import SoundCloudPlayer from '../components/SoundCloudPlayer.vue'
-import SoundCloudLibrary from '../components/SoundCloudLibrary.vue'
 import { api, clearHostToken, getHostToken, getNickname, setNickname } from '../api'
 import { connectToRoom } from '../stomp'
 import { isSoundCloudUrl, largeArtwork } from '../soundcloud'
-import { useSoundCloudAuth } from '../soundcloudAuth'
 
 const props = defineProps({ id: { type: String, required: true } })
 const router = useRouter()
-const { profile: soundCloudProfile } = useSoundCloudAuth()
 
 const DRIFT_MS = 2500 // listeners re-seek when further than this from the host
 const SYNC_INTERVAL_MS = 3000 // how often listeners check their drift
@@ -81,6 +78,7 @@ onMounted(async () => {
       const queued = JSON.parse(window.sessionStorage.getItem('soundstream:queued-source'))
       window.sessionStorage.removeItem('soundstream:queued-source')
       if (queued?.permalinkUrl && isSoundCloudUrl(queued.permalinkUrl)) {
+        pendingAutoplay = true
         playerUrl.value = queued.permalinkUrl
       }
     } catch {
@@ -156,7 +154,7 @@ function retryPlayer() {
 function playTrack(sourceUrl) {
   const url = typeof sourceUrl === 'string' ? sourceUrl.trim() : trackInput.value.trim()
   if (!isSoundCloudUrl(url)) {
-    formError.value = 'Paste a link to a SoundCloud track or playlist.'
+    formError.value = 'Paste a link to a SoundCloud song, playlist, or album.'
     return
   }
   formError.value = ''
@@ -170,10 +168,6 @@ function playTrack(sourceUrl) {
     pendingTrackUrl = url
   }
   trackInput.value = ''
-}
-
-function playLibraryItem(item) {
-  if (item?.streamable && item.permalinkUrl) playTrack(item.permalinkUrl)
 }
 
 function onPlayerEvent(type) {
@@ -355,7 +349,7 @@ async function copyLink() {
           </section>
 
           <form v-if="isHost" class="card" @submit.prevent="playTrack">
-            <label for="track-url">SoundCloud track or playlist link</label>
+            <label for="track-url">SoundCloud song, playlist, or album link</label>
             <div class="row">
               <input
                 id="track-url"
@@ -368,14 +362,6 @@ async function copyLink() {
             <p v-if="formError" class="field-error">{{ formError }}</p>
             <p class="hint">Play, pause, seek or skip in the player below. Listeners follow along automatically.</p>
           </form>
-
-          <SoundCloudLibrary
-            v-if="isHost && soundCloudProfile"
-            class="card room-library"
-            compact
-            picker
-            @select="playLibraryItem"
-          />
 
           <section v-if="!isHost && !tunedIn && !playerReady" class="card tune-in">
             <p v-if="!playback?.trackUrl" class="muted">Waiting for the host to choose the first track.</p>

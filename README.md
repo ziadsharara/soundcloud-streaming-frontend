@@ -6,8 +6,8 @@ Vue 3 streaming portal for shared SoundCloud listening rooms.
 
 - Responsive live-room dashboard with persistent light and dark modes.
 - Create or join a room by code or invite URL.
-- Browse the host's recently played tracks, playlists, liked tracks, and liked playlists.
-- Queue a library item or paste a SoundCloud track/playlist URL.
+- Start a room with a public SoundCloud song, playlist, album, or share URL.
+- Change the public SoundCloud URL at any time from the host studio.
 - Synchronized playback, listener presence, and chat.
 - Production API/WebSocket URLs configurable at build time.
 
