@@ -22,13 +22,13 @@ The expected responses are `{"status":"UP"}` and a JSON room list.
 
 ## 2. Vercel environment
 
-The current AWS URL is committed in `.env.production`. To point a Vercel project at a different backend, override it with this production environment variable:
+Production uses a same-origin Vercel rewrite so every Vercel alias can reach AWS without a separate CORS update. Keep this production environment variable set to:
 
 ```text
-VITE_API_BASE_URL=https://<aws-backend-host>/api
+VITE_API_BASE_URL=/api
 ```
 
-The WebSocket URL is derived as `wss://<aws-backend-host>/ws`. If AWS exposes it on a different hostname, also set:
+The WebSocket URL is derived as `wss://<vercel-host>/ws` and proxied to AWS by `vercel.json`. For deployments that connect directly to a separately configured backend, set:
 
 ```text
 VITE_WS_URL=wss://<websocket-host>/ws

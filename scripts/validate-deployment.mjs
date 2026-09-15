@@ -3,11 +3,13 @@ import { loadEnv } from 'vite'
 const productionEnv = loadEnv('production', process.cwd(), '')
 const apiBase = (process.env.VITE_API_BASE_URL || productionEnv.VITE_API_BASE_URL)?.trim()
 
-if (process.env.VERCEL && (!apiBase || !/^https:\/\/[^/]+(?:\/.*)?$/.test(apiBase))) {
+const validApiBase = apiBase === '/api' || /^https:\/\/[^/]+(?:\/.*)?$/.test(apiBase || '')
+
+if (process.env.VERCEL && !validApiBase) {
   console.error([
-    'SoundStream deployment is missing VITE_API_BASE_URL.',
-    'Set it in Vercel to the public HTTPS backend URL including /api, then redeploy.',
-    'Example: https://api.example.com/api',
+    'SoundStream deployment has an invalid VITE_API_BASE_URL.',
+    'Set it to /api when Vercel proxies the backend, or to a public HTTPS backend URL including /api.',
+    'Examples: /api or https://api.example.com/api',
   ].join('\n'))
   process.exit(1)
 }
