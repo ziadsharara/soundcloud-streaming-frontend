@@ -340,6 +340,7 @@ input:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px
 .queue-list li { display: flex; align-items: center; gap: 7px; min-width: 0; padding: 6px 8px; border: 1px solid var(--border); border-radius: 11px; background: var(--surface-2); }
 .queue-list li.active { border-color: color-mix(in srgb, var(--accent), transparent 45%); background: var(--accent-soft); }
 .queue-play { display: grid; grid-template-columns: 30px minmax(0, 1fr); align-items: center; gap: 8px; min-width: 0; flex: 1; border: 0; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
+.queue-play--readonly { cursor: default; }
 .queue-play > span:first-child { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 8px; background: var(--surface); color: var(--accent); font-size: 11px; }
 .queue-play strong, .queue-play small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .queue-play strong { font-size: 13px; text-transform: capitalize; }

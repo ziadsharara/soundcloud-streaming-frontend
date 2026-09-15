@@ -37,6 +37,7 @@ describe('room realtime connection', () => {
     expect(mocks.client.subscribe.mock.calls.map(([destination]) => destination)).toEqual([
       '/topic/rooms/ABC123/listeners',
       '/topic/rooms/ABC123/chat',
+      '/topic/rooms/ABC123/queue',
       '/topic/rooms/ABC123/closed',
       '/topic/rooms/ABC123/playback',
     ])
@@ -61,6 +62,18 @@ describe('room realtime connection', () => {
 
     expect(onStatus).toHaveBeenCalledWith('disconnected')
     expect(onError).toHaveBeenCalledWith('The live connection was interrupted. Retrying automatically…')
+  })
+
+  it('publishes host queue updates to the validated application destination', () => {
+    const connection = connectToRoom('ABC123', {})
+    const queue = { hostToken: 'token', trackUrls: ['https://soundcloud.com/a/song'], activeIndex: 0 }
+
+    connection.publishQueue(queue)
+
+    expect(mocks.client.publish).toHaveBeenCalledWith({
+      destination: '/app/rooms/ABC123/queue',
+      body: JSON.stringify(queue),
+    })
   })
 
   it('can force a fresh connection from the recovery control', async () => {

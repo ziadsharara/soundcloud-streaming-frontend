@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import SoundCloudPlayer from '../components/SoundCloudPlayer.vue'
 import { api, clearHostToken, getHostToken, getNickname, setNickname } from '../api'
 import { selectLatestPlayback } from '../playback'
+import { mergeChatMessages } from '../roomState'
 import { connectToRoom } from '../stomp'
 import {
   isSoundCloudSetUrl,
@@ -49,6 +50,7 @@ const activeQueueIndex = ref(-1)
 let pendingAutoplay = false
 let pendingTrackUrl = ''
 let hostStarted = false
+let queueServerTime = 0
 
 const chat = ref([])
 const chatText = ref('')
@@ -74,7 +76,15 @@ const inviteButtonLabel = computed(
   () => inviteFeedback.value || (canNativeShare ? 'Share invite' : 'Copy invite link'),
 )
 
-watch(trackQueue, persistQueue, { deep: true })
+watch(
+  trackQueue,
+  () => {
+    persistQueue()
+    broadcastQueue()
+  },
+  { deep: true },
+)
+watch(activeQueueIndex, broadcastQueue)
 
 onMounted(async () => {
   try {
@@ -82,7 +92,10 @@ onMounted(async () => {
     room.value = data
     listeners.value = data.listeners
     playback.value = data.playback
+    chat.value = mergeChatMessages([], data.chat, MAX_CHAT)
+    if (!isHost) applyQueueState(data.queue)
     clockOffset = Date.now() - data.serverNow
+    scrollChatToBottom()
   } catch (e) {
     error.value = e.message
     return
@@ -114,7 +127,10 @@ onMounted(async () => {
       status.value = s
       if (s === 'connected') {
         realtimeError.value = ''
-        if (isHost) broadcastState()
+        if (isHost) {
+          broadcastState()
+          broadcastQueue()
+        }
         else refreshPlaybackState()
       }
     },
@@ -123,10 +139,10 @@ onMounted(async () => {
       playback.value = state
       syncToHost()
     },
+    onQueue: applyQueueState,
     onListeners: (count) => (listeners.value = count),
     onChat: (message) => {
-      chat.value.push(message)
-      if (chat.value.length > MAX_CHAT) chat.value.shift()
+      chat.value = mergeChatMessages(chat.value, [message], MAX_CHAT)
       scrollChatToBottom()
     },
     onClosed: () => {
@@ -268,6 +284,22 @@ function clearQueue() {
   activeQueueIndex.value = -1
 }
 
+function broadcastQueue() {
+  if (!isHost || !connection) return
+  connection.publishQueue({
+    hostToken,
+    trackUrls: [...trackQueue.value],
+    activeIndex: activeQueueIndex.value,
+  })
+}
+
+function applyQueueState(state) {
+  if (isHost || !state || state.serverTime < queueServerTime) return
+  queueServerTime = state.serverTime
+  trackQueue.value = Array.isArray(state.trackUrls) ? [...state.trackUrls] : []
+  activeQueueIndex.value = Number.isInteger(state.activeIndex) ? state.activeIndex : -1
+}
+
 function onPlayerEvent(type) {
   if (!isHost) {
     if (type === 'play' && !tunedIn.value) {
@@ -357,6 +389,9 @@ async function refreshPlaybackState(forceSync = false) {
     clockOffset = Date.now() - data.serverNow
     // A playback event can arrive while this request is in flight; never replace it with an older snapshot.
     playback.value = selectLatestPlayback(playback.value, data.playback)
+    applyQueueState(data.queue)
+    chat.value = mergeChatMessages(chat.value, data.chat, MAX_CHAT)
+    scrollChatToBottom()
     await syncToHost(forceSync)
   } catch (e) {
     realtimeError.value = `Connected, but the latest playback state could not be loaded. ${e.message}`
@@ -551,6 +586,28 @@ async function shareInvite() {
             </ol>
           </section>
 
+          <section v-else-if="trackQueue.length" class="card host-queue listener-queue">
+            <div class="queue-heading">
+              <div>
+                <p class="eyebrow">Coming up</p>
+                <h3>Room queue <span>{{ trackQueue.length }}</span></h3>
+              </div>
+            </div>
+            <ol class="queue-list">
+              <li v-for="(url, index) in trackQueue" :key="url" :class="{ active: index === activeQueueIndex }">
+                <div class="queue-play queue-play--readonly">
+                  <span>{{ index === activeQueueIndex ? '▶' : index + 1 }}</span>
+                  <span>
+                    <strong>{{ soundCloudUrlLabel(url) }}</strong>
+                    <small>
+                      {{ index === activeQueueIndex ? 'Playing now' : isSoundCloudSetUrl(url) ? 'Playlist or album' : 'Up next' }}
+                    </small>
+                  </span>
+                </div>
+              </li>
+            </ol>
+          </section>
+
           <section v-if="!isHost && !tunedIn && !playerReady" class="card tune-in">
             <p v-if="!playback?.trackUrl" class="muted">Waiting for the host to choose the first track.</p>
             <p v-else class="muted">Preparing the SoundCloud player…</p>
@@ -601,7 +658,7 @@ async function shareInvite() {
           <h3>Chat</h3>
           <ul ref="chatList" class="chat-list">
             <li v-if="!chat.length" class="muted">No messages yet. Say hi 👋</li>
-            <li v-for="(message, i) in chat" :key="i">
+            <li v-for="(message, i) in chat" :key="message.id || i">
               <strong :class="{ 'is-host': message.host }">{{ message.author }}</strong>
               <span v-if="message.host" class="badge">host</span>
               {{ message.text }}
