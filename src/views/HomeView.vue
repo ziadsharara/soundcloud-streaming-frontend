@@ -1,7 +1,7 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { api, getNickname, setHostToken, setNickname } from '../api'
+import { api, clearHostToken, getHostToken, getNickname, setHostToken, setNickname } from '../api'
 import { isSoundCloudUrl, largeArtwork } from '../soundcloud'
 import { parseRoomCode } from '../roomCode'
 
@@ -11,6 +11,7 @@ const router = useRouter()
 const rooms = ref([])
 const loading = ref(true)
 const listError = ref('')
+const deletingRoomId = ref('')
 const roomName = ref('')
 const hostName = ref(getNickname())
 const creating = ref(false)
@@ -29,6 +30,27 @@ async function refresh() {
     listError.value = e.message
   } finally {
     loading.value = false
+  }
+}
+
+function canDeleteRoom(roomId) {
+  return Boolean(getHostToken(roomId))
+}
+
+async function deleteRoom(room) {
+  const hostToken = getHostToken(room.id)
+  if (!hostToken || !window.confirm(`Delete “${room.name}” for everyone?`)) return
+
+  deletingRoomId.value = room.id
+  listError.value = ''
+  try {
+    await api.closeRoom(room.id, hostToken)
+    clearHostToken(room.id)
+    rooms.value = rooms.value.filter(({ id }) => id !== room.id)
+  } catch (e) {
+    listError.value = e.message
+  } finally {
+    deletingRoomId.value = ''
   }
 }
 
@@ -204,15 +226,27 @@ onBeforeUnmount(() => clearInterval(timer))
         <a class="btn btn--compact" href="#start">Create a room</a>
       </div>
       <div v-else class="room-grid-list">
-        <RouterLink v-for="room in rooms" :key="room.id" :to="{ name: 'room', params: { id: room.id } }" class="room-tile">
-          <div class="room-art">
-            <img v-if="room.playback?.artworkUrl" :src="largeArtwork(room.playback.artworkUrl)" alt="" />
-            <span v-else>♫</span>
-            <i class="room-live-dot"></i>
-          </div>
-          <div class="room-tile-copy"><strong>{{ room.name }}</strong><span>{{ room.hostName }}</span><small>{{ room.playback?.title || 'Warming up' }}</small></div>
-          <span class="listener-count">◉ {{ room.listeners }}</span>
-        </RouterLink>
+        <article v-for="room in rooms" :key="room.id" class="room-tile">
+          <RouterLink :to="{ name: 'room', params: { id: room.id } }" class="room-tile-link">
+            <div class="room-art">
+              <img v-if="room.playback?.artworkUrl" :src="largeArtwork(room.playback.artworkUrl)" alt="" />
+              <span v-else>♫</span>
+              <i class="room-live-dot"></i>
+            </div>
+            <div class="room-tile-copy"><strong>{{ room.name }}</strong><span>{{ room.hostName }}</span><small>{{ room.playback?.title || 'Warming up' }}</small></div>
+            <span class="listener-count">◉ {{ room.listeners }}</span>
+          </RouterLink>
+          <button
+            v-if="canDeleteRoom(room.id)"
+            class="room-delete-button"
+            type="button"
+            :disabled="deletingRoomId === room.id"
+            :aria-label="`Delete ${room.name}`"
+            @click="deleteRoom(room)"
+          >
+            {{ deletingRoomId === room.id ? 'Deleting…' : 'Delete' }}
+          </button>
+        </article>
       </div>
     </section>
 

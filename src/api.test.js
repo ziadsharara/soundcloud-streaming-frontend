@@ -38,4 +38,18 @@ describe('API client', () => {
   it('derives a secure WebSocket URL from the page origin', () => {
     expect(webSocketUrl()).toBe('wss://app.example.com/ws')
   })
+
+  it('deletes a room using its host token', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(api.closeRoom('K7QH2M', 'host-token')).resolves.toBeNull()
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/rooms/K7QH2M',
+      expect.objectContaining({
+        method: 'DELETE',
+        headers: { 'X-Host-Token': 'host-token' },
+      }),
+    )
+  })
 })

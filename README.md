@@ -10,6 +10,7 @@ Vue 3 streaming portal for shared SoundCloud listening rooms.
 - Paste several public SoundCloud URLs and manage them with previous, next, remove, and clear queue controls.
 - Synchronized playback, listener presence, and a host-managed queue visible to everyone.
 - Live chat with recent history for people who join late or reconnect.
+- Hosts can delete their rooms directly from the Live rooms list.
 - Instant playback-state recovery after reconnects, plus a manual sync control.
 - Native invite sharing on supported phones and a clipboard fallback everywhere else.
 - Production API/WebSocket URLs configurable at build time.
