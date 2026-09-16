@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { avatarById } from '../avatars'
 
 const props = defineProps({
-  id: { type: String, default: 'cassette' },
+  id: { type: String, default: 'bun' },
   size: { type: Number, default: 40 },
   flat: { type: Boolean, default: false },
 })
