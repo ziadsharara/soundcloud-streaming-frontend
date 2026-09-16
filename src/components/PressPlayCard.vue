@@ -18,17 +18,17 @@ defineProps({
   <section class="card sketch-frame press-play">
     <figure class="press-play-art">
       <svg viewBox="0 0 200 140" aria-hidden="true">
-        <!-- the listener -->
-        <circle cx="54" cy="46" r="21" />
-        <path d="M33 44v-4a21 21 0 0 1 42 0v4" />
-        <rect x="27" y="42" width="11" height="17" rx="5.5" />
-        <rect x="70" y="42" width="11" height="17" rx="5.5" />
-        <path d="M47 44v.2M62 44v.2" />
-        <path d="M48 53a7 4.5 0 0 0 12 0" />
-        <path d="M24 132a31 29 0 0 1 60 0" />
-        <!-- reaching out to press play -->
-        <path d="M80 96c14-3 24-9 33-17" />
-        <circle cx="119" cy="76" r="5.5" />
+        <!-- the listener: head, then shoulders that actually meet it -->
+        <circle cx="52" cy="44" r="20" />
+        <path d="M31 42v-3a21 21 0 0 1 42 0v3" />
+        <rect x="25" y="40" width="11" height="17" rx="5.5" />
+        <rect x="68" y="40" width="11" height="17" rx="5.5" />
+        <path d="M45 42v.2M59 42v.2" />
+        <path d="M46 51a6.5 4 0 0 0 12 0" />
+        <path d="M22 118a30 48 0 0 1 60 0" />
+        <!-- an arm off the shoulder, reaching for the button -->
+        <path d="M76 90c14 0 26-5 35-11" />
+        <circle cx="118" cy="76" r="5.5" />
         <!-- the play button -->
         <circle cx="156" cy="70" r="27" />
         <path d="M148 56l20 14-20 14z" />
