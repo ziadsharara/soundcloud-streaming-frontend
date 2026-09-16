@@ -26,13 +26,13 @@ describe('API client', () => {
       ),
     )
 
-    await expect(api.listRooms()).rejects.toThrow('The backend API is not connected to this deployment.')
+    await expect(api.listRooms()).rejects.toThrow('SoundStream isn’t reachable right now. Try again in a moment.')
   })
 
   it('turns network failures into an actionable message', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')))
 
-    await expect(api.listRooms()).rejects.toThrow('The backend API could not be reached')
+    await expect(api.listRooms()).rejects.toThrow('Can’t reach SoundStream')
   })
 
   it('derives a secure WebSocket URL from the page origin', () => {

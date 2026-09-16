@@ -58,6 +58,6 @@ function submit() {
 
     <p v-if="error" class="field-error">{{ error }}</p>
     <button class="btn btn--large btn--full" type="submit">Join the room</button>
-    <p class="hint">Your browser needs one click before it can play audio, so this doubles as that.</p>
+    <p class="hint">One tap here lets your browser start playing the music.</p>
   </form>
 </template>

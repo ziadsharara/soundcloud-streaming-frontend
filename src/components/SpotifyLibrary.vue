@@ -12,8 +12,8 @@ import {
 /**
  * The host's own Spotify library, for queueing without pasting links.
  *
- * Deliberately host-only and optional: Spotify's development-mode apps admit five allow-listed
- * Premium accounts, so this can never be part of the guest path.
+ * When this site has no Spotify app configured the panel renders nothing at all — a guest or a
+ * non-technical host should never be shown setup instructions they cannot act on.
  */
 const emit = defineEmits(['queue'])
 
@@ -55,22 +55,14 @@ function disconnect() {
 </script>
 
 <template>
-  <section class="card spotify-library sketch-frame-2">
+  <section v-if="spotifyConfigured" class="card spotify-library sketch-frame-2">
     <div class="members-head">
       <p class="eyebrow">Your library</p>
       <h3>Spotify</h3>
     </div>
 
-    <p v-if="!spotifyConfigured" class="muted">
-      Set <code>VITE_SPOTIFY_CLIENT_ID</code> to browse your own playlists and likes here. Pasting
-      Spotify links works without it.
-    </p>
-
-    <template v-else-if="!connected">
-      <p class="muted">
-        Connect to queue straight from your playlists and liked songs. Spotify allows five
-        allow-listed Premium accounts per hobby app, so this is for you, not your guests.
-      </p>
+    <template v-if="!connected">
+      <p class="muted">Connect Spotify to queue straight from your playlists and liked songs.</p>
       <button class="btn btn--soft btn--full" type="button" @click="connect">Connect Spotify</button>
     </template>
 
@@ -94,7 +86,7 @@ function disconnect() {
           </button>
         </li>
       </ul>
-      <p v-else class="muted">Pick a tab to load your library.</p>
+      <p v-else class="muted">Pick a tab to load your music.</p>
     </template>
 
     <p v-if="error" class="field-error">{{ error }}</p>

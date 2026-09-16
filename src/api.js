@@ -4,7 +4,7 @@ const configuredBase = (import.meta.env.VITE_API_BASE_URL || '/api').trim().repl
 function responseMessage(res, data) {
   if (data && typeof data === 'object' && (data.detail || data.message)) return data.detail || data.message
   if (res.status === 404 && res.headers.get('x-vercel-error')) {
-    return 'The backend API is not connected to this deployment.'
+    return 'SoundStream isn’t reachable right now. Try again in a moment.'
   }
   return ''
 }
@@ -21,8 +21,8 @@ async function request(path, { method = 'GET', body, headers = {} } = {}) {
       signal: controller.signal,
     })
   } catch (error) {
-    if (error?.name === 'AbortError') throw new Error('The backend API took too long to respond.')
-    throw new Error('The backend API could not be reached. Check the deployment URL and CORS settings.')
+    if (error?.name === 'AbortError') throw new Error('SoundStream is taking too long to answer. Try again.')
+    throw new Error('Can’t reach SoundStream. Check your connection and try again.')
   } finally {
     clearTimeout(timeout)
   }

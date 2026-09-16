@@ -125,8 +125,7 @@ defineExpose({
   <div class="spotify-player">
     <div ref="host"></div>
     <p class="hint">
-      Spotify only lets embedded players play a ~30 second preview, even for Premium listeners.
-      Full tracks stay in sync on SoundCloud.
+      Spotify only plays a 30-second preview here, even with Premium. For full songs, use SoundCloud or YouTube.
     </p>
   </div>
 </template>

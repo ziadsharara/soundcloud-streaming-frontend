@@ -6,7 +6,8 @@ import Doodle from '../components/Doodle.vue'
 import { api, clearHostToken, getHostToken, setHostToken } from '../api'
 import { AVATARS } from '../avatars'
 import { getIdentity, setIdentity } from '../identity'
-import { PROVIDERS, isSupportedUrl, providerMeta } from '../providers'
+import ProviderLogo from '../components/ProviderLogo.vue'
+import { PROVIDER_LIST, isSupportedUrl, providerBadge } from '../providers'
 import { largeArtwork } from '../soundcloud'
 import { parseRoomCode } from '../roomCode'
 
@@ -65,7 +66,7 @@ async function createRoom() {
   createError.value = ''
   const url = sourceUrl.value.trim()
   if (url && !isSupportedUrl(url)) {
-    createError.value = 'Paste a SoundCloud, Spotify or Anghami link — or leave it empty.'
+    createError.value = 'Paste a SoundCloud, YouTube, Spotify or Anghami link — or leave it empty.'
     return
   }
   creating.value = true
@@ -123,13 +124,24 @@ onBeforeUnmount(() => clearInterval(timer))
           together.
         </h1>
         <p class="lede">
-          Paste a link from SoundCloud, Spotify or Anghami. Share one room code. Your friends land in
+          Paste a link from SoundCloud, YouTube, Spotify or Anghami. Share one room code. Your friends land in
           the same song, at the same second, with a name and a face.
         </p>
         <div class="hero-actions">
           <a class="btn btn--large" href="#start">Start a room</a>
           <a class="btn btn--outline btn--large" href="#live">See who is live</a>
           <Doodle name="arrow" :width="64" class="doodle-hero-arrow marker-coral" />
+        </div>
+
+        <div class="works-with">
+          <p class="hand">works with</p>
+          <ul>
+            <li><ProviderLogo logo="soundcloud" label="SoundCloud" :size="26" /></li>
+            <li><ProviderLogo logo="youtubemusic" label="YouTube Music" :size="26" /></li>
+            <li><ProviderLogo logo="youtube" label="YouTube" :size="26" /></li>
+            <li><ProviderLogo logo="spotify" label="Spotify" :size="26" /></li>
+            <li><ProviderLogo logo="anghami" label="Anghami" :size="26" /></li>
+          </ul>
         </div>
       </div>
 
@@ -214,17 +226,21 @@ onBeforeUnmount(() => clearInterval(timer))
 
     <section class="page section">
       <div class="section-heading">
-        <p class="eyebrow">Be honest about the plumbing</p>
-        <h2>What each service actually allows</h2>
+        <p class="eyebrow">Before you start</p>
+        <h2>What works where</h2>
       </div>
       <div class="source-grid">
-        <article v-for="provider in Object.values(PROVIDERS)" :key="provider.id" class="card sketch-frame-2">
-          <span class="chip" :class="`marker-${provider.marker}`">{{ provider.label }}</span>
-          <h3>
-            {{ provider.sync === 'full' ? 'Full sync' : provider.sync === 'preview' ? 'Preview only' : 'Link only' }}
-          </h3>
+        <article v-for="provider in PROVIDER_LIST" :key="provider.id" class="card sketch-frame-2 source-card">
+          <div class="source-head">
+            <ProviderLogo :logo="provider.id === 'youtube' ? 'youtubemusic' : provider.id" :label="provider.label" :size="30" />
+            <div>
+              <strong>{{ provider.label }}</strong>
+              <small v-if="provider.altLabel" class="muted">+ {{ provider.altLabel }}</small>
+            </div>
+          </div>
+          <h3 :class="`sync-${provider.sync}`">{{ provider.syncLabel }}</h3>
           <p class="muted">{{ provider.syncNote }}</p>
-          <p v-if="provider.id === 'soundcloud'" class="hand">use this one for a real listening party</p>
+          <p v-if="provider.sync === 'full'" class="hand">good for a real listening party</p>
         </article>
       </div>
     </section>
@@ -256,13 +272,12 @@ onBeforeUnmount(() => clearInterval(timer))
               <strong>{{ room.name }}</strong>
               <span class="muted">{{ room.hostName }}</span>
               <small>
-                <span
-                  v-if="providerMeta(room.playback?.trackUrl || '')"
-                  class="chip chip--small"
-                  :class="`marker-${providerMeta(room.playback?.trackUrl).marker}`"
-                >
-                  {{ providerMeta(room.playback?.trackUrl).label }}
-                </span>
+                <ProviderLogo
+                  v-if="providerBadge(room.playback?.trackUrl || '')"
+                  :logo="providerBadge(room.playback.trackUrl).logo"
+                  :label="providerBadge(room.playback.trackUrl).label"
+                  :size="16"
+                />
                 {{ room.playback?.title || 'Warming up' }}
               </small>
             </span>
@@ -291,7 +306,7 @@ onBeforeUnmount(() => clearInterval(timer))
         <li>
           <span class="step-number hand">1</span>
           <h3>Paste the soundtrack</h3>
-          <p class="muted">A song, playlist or album link. SoundCloud keeps everyone in true sync.</p>
+          <p class="muted">A song, playlist or album link. SoundCloud and YouTube keep everyone in true sync.</p>
         </li>
         <li>
           <span class="step-number hand">2</span>

@@ -12,7 +12,8 @@ import { getIdentity, setIdentity } from '../identity'
 import { selectLatestPlayback } from '../playback'
 import { mergeChatMessages } from '../roomState'
 import { connectToRoom } from '../stomp'
-import { detectProvider, isSetUrl, isSupportedUrl, parseUrls, providerMeta, urlLabel } from '../providers'
+import ProviderLogo from '../components/ProviderLogo.vue'
+import { detectProvider, isSetUrl, isSupportedUrl, parseUrls, providerBadge, urlLabel } from '../providers'
 import { largeArtwork } from '../soundcloud'
 
 const props = defineProps({ id: { type: String, required: true } })
@@ -75,7 +76,7 @@ const statusLabel = computed(
 )
 const artwork = computed(() => largeArtwork(playback.value?.artworkUrl))
 const activeQueueUrl = computed(() => trackQueue.value[activeQueueIndex.value] || '')
-const nowPlaying = computed(() => providerMeta(playback.value?.trackUrl || ''))
+const nowPlaying = computed(() => providerBadge(playback.value?.trackUrl || ''))
 const inviteButtonLabel = computed(
   () => inviteFeedback.value || (canNativeShare ? 'Share invite' : 'Copy invite link'),
 )
@@ -283,12 +284,12 @@ function addToQueue(url) {
 function addUrls(playFirst) {
   const urls = parseUrls(trackInput.value)
   if (!urls.length) {
-    formError.value = 'Paste at least one SoundCloud, Spotify or Anghami link.'
+    formError.value = 'Paste at least one SoundCloud, YouTube, Spotify or Anghami link.'
     return
   }
   const invalidIndex = urls.findIndex((url) => !isSupportedUrl(url))
   if (invalidIndex >= 0) {
-    formError.value = `Link ${invalidIndex + 1} is not a SoundCloud, Spotify or Anghami URL.`
+    formError.value = `Link ${invalidIndex + 1} isn\u2019t a SoundCloud, YouTube, Spotify or Anghami link.`
     return
   }
   formError.value = ''
@@ -306,7 +307,7 @@ function queueFromLibrary(url) {
 function loadSource(sourceUrl) {
   const url = sourceUrl.trim()
   if (!isSupportedUrl(url)) {
-    formError.value = 'Paste a link to a SoundCloud, Spotify or Anghami track, playlist or album.'
+    formError.value = 'Paste a link to a SoundCloud, YouTube, Spotify or Anghami track, playlist or album.'
     return
   }
   formError.value = ''
@@ -595,14 +596,17 @@ async function shareInvite() {
               </h2>
               <p v-if="playback?.artist" class="muted">{{ playback.artist }}</p>
               <p v-if="nowPlaying" class="provider-note">
-                <span class="chip" :class="`marker-${nowPlaying.marker}`">{{ nowPlaying.label }}</span>
+                <span class="provider-chip">
+                  <ProviderLogo :logo="nowPlaying.logo" :label="nowPlaying.label" :size="18" />
+                  {{ nowPlaying.label }}
+                </span>
                 <span class="muted">{{ nowPlaying.syncNote }}</span>
               </p>
             </div>
           </section>
 
           <form v-if="isHost" class="card sketch-frame-2" @submit.prevent="addUrls(true)">
-            <label for="track-url">SoundCloud, Spotify or Anghami links</label>
+            <label for="track-url">SoundCloud, YouTube, Spotify or Anghami links</label>
             <textarea
               id="track-url"
               v-model="trackInput"
@@ -616,8 +620,8 @@ async function shareInvite() {
             </div>
             <p v-if="formError" class="field-error">{{ formError }}</p>
             <p class="hint">
-              SoundCloud plays full tracks in sync. Spotify embeds are limited to a ~30s preview, and
-              Anghami links open in Anghami.
+              SoundCloud and YouTube play full songs in sync. Spotify plays a 30-second preview, and Anghami
+              opens in its own app.
             </p>
           </form>
 
@@ -645,10 +649,14 @@ async function shareInvite() {
                   <span class="queue-text">
                     <strong>{{ urlLabel(url) }}</strong>
                     <small>
-                      <span class="chip chip--small" :class="`marker-${providerMeta(url)?.marker}`">
-                        {{ providerMeta(url)?.label }}
-                      </span>
-                      {{ isSetUrl(url) ? 'Playlist or album' : 'Single track' }}
+                      <ProviderLogo
+                        v-if="providerBadge(url)"
+                        :logo="providerBadge(url).logo"
+                        :label="providerBadge(url).label"
+                        :size="15"
+                      />
+                      {{ providerBadge(url)?.label }}
+                      · {{ isSetUrl(url) ? 'Playlist or album' : 'Single track' }}
                     </small>
                   </span>
                 </component>

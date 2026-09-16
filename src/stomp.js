@@ -38,7 +38,7 @@ export function connectToRoom(
   }
   client.onWebSocketError = () => onError?.('The live connection failed. Retrying automatically…')
   client.onStompError = (frame) => {
-    onError?.(frame.headers.message || 'The room server rejected the live connection.')
+    onError?.(frame.headers.message || 'Couldn’t join this room’s live updates.')
     console.error('STOMP error', frame.headers.message, frame.body)
   }
   client.activate()

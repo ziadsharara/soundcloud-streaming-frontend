@@ -63,7 +63,7 @@ function base64Url(buffer) {
 
 /** Sends the host to Spotify's consent screen; they come back to /spotify/callback. */
 export async function connectSpotify(returnTo) {
-  if (!spotifyConfigured) throw new Error('No Spotify client ID is configured for this deployment.')
+  if (!spotifyConfigured) throw new Error('Spotify isn\u2019t set up on this site yet.')
   const verifier = randomVerifier()
   const challenge = base64Url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)))
   session((s) => s.setItem(VERIFIER_KEY, verifier))
@@ -87,7 +87,7 @@ async function requestToken(body) {
     body: new URLSearchParams({ client_id: CLIENT_ID, ...body }),
   })
   const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data.error_description || 'Spotify refused the sign-in.')
+  if (!res.ok) throw new Error(data.error_description || 'Spotify couldn\u2019t sign you in.')
   writeToken({
     access_token: data.access_token,
     refresh_token: data.refresh_token || readToken()?.refresh_token || '',
@@ -133,7 +133,7 @@ async function spotifyGet(path) {
     throw new Error('Your Spotify session expired. Connect again.')
   }
   if (res.status === 403) {
-    throw new Error('This Spotify account is not on the app’s allow-list (development mode permits five).')
+    throw new Error('Spotify hasn’t approved this account for SoundStream yet.')
   }
   if (!res.ok) throw new Error(`Spotify request failed (${res.status}).`)
   return res.json()

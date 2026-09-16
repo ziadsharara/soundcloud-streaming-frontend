@@ -45,8 +45,8 @@ defineExpose({
     <p class="eyebrow">Anghami</p>
     <h3>{{ urlLabel(initialUrl) }}</h3>
     <p class="muted">
-      Anghami has no public player API, so this one cannot be synced. Open it in Anghami and press
-      play when the host does.
+      Anghami songs can’t play inside SoundStream. Open it in Anghami and press play when the host
+      does.
     </p>
     <a class="btn" :href="initialUrl" target="_blank" rel="noreferrer">Open in Anghami ↗</a>
   </div>

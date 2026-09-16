@@ -22,7 +22,7 @@ onMounted(async () => {
   <main class="page narrow-page">
     <div class="card sketch-frame">
       <h2>{{ error ? 'Spotify sign-in failed' : 'Connecting Spotify…' }}</h2>
-      <p class="muted">{{ error || 'One moment, finishing the handshake.' }}</p>
+      <p class="muted">{{ error || 'One moment, connecting your account.' }}</p>
     </div>
   </main>
 </template>
