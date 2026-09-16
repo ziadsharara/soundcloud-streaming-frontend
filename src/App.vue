@@ -48,7 +48,7 @@ const { theme, toggleTheme } = useTheme()
       </RouterLink>
       <p class="hand">shared moments, one play button</p>
       <p class="muted footer-note">
-        Music plays from SoundCloud, YouTube, Spotify and Anghami. Not affiliated with any of them.
+        Music plays from SoundCloud and YouTube. Not affiliated with either of them.
       </p>
     </footer>
   </div>

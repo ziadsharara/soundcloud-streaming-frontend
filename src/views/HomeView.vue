@@ -7,7 +7,7 @@ import { api, clearHostToken, getHostToken, setHostToken } from '../api'
 import { AVATARS } from '../avatars'
 import { getIdentity, setIdentity } from '../identity'
 import ProviderLogo from '../components/ProviderLogo.vue'
-import { PROVIDER_LIST, isSupportedUrl, providerBadge } from '../providers'
+import { SOURCE_CARDS, isSupportedUrl, providerBadge } from '../providers'
 import { largeArtwork } from '../soundcloud'
 import { parseRoomCode } from '../roomCode'
 
@@ -66,7 +66,7 @@ async function createRoom() {
   createError.value = ''
   const url = sourceUrl.value.trim()
   if (url && !isSupportedUrl(url)) {
-    createError.value = 'Paste a SoundCloud, YouTube, Spotify or Anghami link — or leave it empty.'
+    createError.value = 'Paste a SoundCloud or YouTube link — or leave it empty.'
     return
   }
   creating.value = true
@@ -124,8 +124,8 @@ onBeforeUnmount(() => clearInterval(timer))
           together.
         </h1>
         <p class="lede">
-          Paste a link from SoundCloud, YouTube, Spotify or Anghami. Share one room code. Your friends land in
-          the same song, at the same second, with a name and a face.
+          Paste a link from SoundCloud, YouTube Music or YouTube. Share one room code. Your friends
+          land in the same song, at the same second, with a name and a face.
         </p>
         <div class="hero-actions">
           <a class="btn btn--large" href="#start">Start a room</a>
@@ -139,8 +139,6 @@ onBeforeUnmount(() => clearInterval(timer))
             <li><ProviderLogo logo="soundcloud" label="SoundCloud" :size="26" /></li>
             <li><ProviderLogo logo="youtubemusic" label="YouTube Music" :size="26" /></li>
             <li><ProviderLogo logo="youtube" label="YouTube" :size="26" /></li>
-            <li><ProviderLogo logo="spotify" label="Spotify" :size="26" /></li>
-            <li><ProviderLogo logo="anghami" label="Anghami" :size="26" /></li>
           </ul>
         </div>
       </div>
@@ -226,23 +224,19 @@ onBeforeUnmount(() => clearInterval(timer))
 
     <section class="page section">
       <div class="section-heading">
-        <p class="eyebrow">Before you start</p>
-        <h2>What works where</h2>
+        <p class="eyebrow">Bring your own music</p>
+        <h2>Where the songs come from</h2>
       </div>
       <div class="source-grid">
-        <article v-for="provider in PROVIDER_LIST" :key="provider.id" class="card sketch-frame-2 source-card">
+        <article v-for="source in SOURCE_CARDS" :key="source.logo" class="card sketch-frame-2 source-card">
           <div class="source-head">
-            <ProviderLogo :logo="provider.id === 'youtube' ? 'youtubemusic' : provider.id" :label="provider.label" :size="30" />
-            <div>
-              <strong>{{ provider.label }}</strong>
-              <small v-if="provider.altLabel" class="muted">+ {{ provider.altLabel }}</small>
-            </div>
+            <ProviderLogo :logo="source.logo" :label="source.label" :size="30" />
+            <strong>{{ source.label }}</strong>
           </div>
-          <h3 :class="`sync-${provider.sync}`">{{ provider.syncLabel }}</h3>
-          <p class="muted">{{ provider.syncNote }}</p>
-          <p v-if="provider.sync === 'full'" class="hand">good for a real listening party</p>
+          <p class="muted">{{ source.note }}</p>
         </article>
       </div>
+      <p class="hand sources-note">no accounts, no installs — just paste a link</p>
     </section>
 
     <section id="live" class="page section">
@@ -306,7 +300,7 @@ onBeforeUnmount(() => clearInterval(timer))
         <li>
           <span class="step-number hand">1</span>
           <h3>Paste the soundtrack</h3>
-          <p class="muted">A song, playlist or album link. SoundCloud and YouTube keep everyone in true sync.</p>
+          <p class="muted">A song, playlist or album link from SoundCloud or YouTube.</p>
         </li>
         <li>
           <span class="step-number hand">2</span>

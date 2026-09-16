@@ -6,7 +6,6 @@ import ChatPanel from '../components/ChatPanel.vue'
 import JoinGate from '../components/JoinGate.vue'
 import MemberList from '../components/MemberList.vue'
 import RoomPlayer from '../components/RoomPlayer.vue'
-import SpotifyLibrary from '../components/SpotifyLibrary.vue'
 import { api, clearHostToken, getHostToken } from '../api'
 import { getIdentity, setIdentity } from '../identity'
 import { selectLatestPlayback } from '../playback'
@@ -217,9 +216,9 @@ function onPlayerReady() {
       pendingAutoplay = false
       player.value.play()
     }
-    // Announce the loaded track even if the embed cannot start by itself: an Anghami card has no
-    // play button at all, and a Spotify embed often refuses to autoplay. Without this the room
-    // would keep showing the previous track. broadcastState() ignores a merely restored player.
+    // Announce the loaded track even if the embed refuses to start on its own, which YouTube
+    // does whenever autoplay is blocked. Without this the room would keep showing the previous
+    // track. broadcastState() ignores a merely restored player.
     broadcastState()
     return
   }
@@ -284,12 +283,12 @@ function addToQueue(url) {
 function addUrls(playFirst) {
   const urls = parseUrls(trackInput.value)
   if (!urls.length) {
-    formError.value = 'Paste at least one SoundCloud, YouTube, Spotify or Anghami link.'
+    formError.value = 'Paste at least one SoundCloud or YouTube link.'
     return
   }
   const invalidIndex = urls.findIndex((url) => !isSupportedUrl(url))
   if (invalidIndex >= 0) {
-    formError.value = `Link ${invalidIndex + 1} isn\u2019t a SoundCloud, YouTube, Spotify or Anghami link.`
+    formError.value = `Link ${invalidIndex + 1} isn\u2019t a SoundCloud or YouTube link.`
     return
   }
   formError.value = ''
@@ -307,7 +306,7 @@ function queueFromLibrary(url) {
 function loadSource(sourceUrl) {
   const url = sourceUrl.trim()
   if (!isSupportedUrl(url)) {
-    formError.value = 'Paste a link to a SoundCloud, YouTube, Spotify or Anghami track, playlist or album.'
+    formError.value = 'Paste a link to a SoundCloud or YouTube song, playlist or album.'
     return
   }
   formError.value = ''
@@ -456,7 +455,7 @@ async function syncToHost(force = false) {
       await player.value.load(state.trackUrl, { autoPlay: state.playing })
     }
     const paused = await player.value.isPaused()
-    // Anghami has no player to drive; the card just shows the link.
+    // A player that cannot report its state yet: leave it alone rather than guess.
     if (paused === null) return
     if (state.playing && paused) player.value.play()
     else if (!state.playing && !paused) player.value.pause()
@@ -600,13 +599,12 @@ async function shareInvite() {
                   <ProviderLogo :logo="nowPlaying.logo" :label="nowPlaying.label" :size="18" />
                   {{ nowPlaying.label }}
                 </span>
-                <span class="muted">{{ nowPlaying.syncNote }}</span>
               </p>
             </div>
           </section>
 
           <form v-if="isHost" class="card sketch-frame-2" @submit.prevent="addUrls(true)">
-            <label for="track-url">SoundCloud, YouTube, Spotify or Anghami links</label>
+            <label for="track-url">SoundCloud or YouTube links</label>
             <textarea
               id="track-url"
               v-model="trackInput"
@@ -620,8 +618,8 @@ async function shareInvite() {
             </div>
             <p v-if="formError" class="field-error">{{ formError }}</p>
             <p class="hint">
-              SoundCloud and YouTube play full songs in sync. Spotify plays a 30-second preview, and Anghami
-              opens in its own app.
+              Songs, playlists and albums all work. Everyone in the room hears the same moment of the
+              same track.
             </p>
           </form>
 
@@ -714,7 +712,6 @@ async function shareInvite() {
             @send="sendChat"
             @sticker="sendSticker"
           />
-          <SpotifyLibrary v-if="isHost" @queue="queueFromLibrary" />
         </aside>
       </div>
     </template>

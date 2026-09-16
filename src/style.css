@@ -1080,9 +1080,6 @@ div.queue-play {
   border-radius: 14px;
 }
 
-.spotify-player iframe {
-  min-height: 352px;
-}
 
 .player-controls {
   display: flex;
@@ -1110,15 +1107,7 @@ div.queue-play {
   accent-color: var(--marker-coral);
 }
 
-.anghami-card {
-  padding: 22px;
-  border: 1.8px dashed var(--line);
-  text-align: center;
-}
 
-.anghami-card .btn {
-  margin-top: 14px;
-}
 
 .ended {
   display: flex;
@@ -1308,92 +1297,16 @@ div.queue-play {
 
 /* ---- Spotify library ---- */
 
-.tabs {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 12px;
-}
 
-.tabs button {
-  padding: 6px 11px;
-  border: 1.6px solid var(--line);
-  border-radius: 11px 8px 12px 9px;
-  background: none;
-  color: var(--ink-muted);
-  font-size: 0.86rem;
-  font-weight: 600;
-  cursor: pointer;
-}
 
-.tabs button.active {
-  border-color: var(--ink);
-  color: var(--ink);
-  background: var(--paper-sunk);
-}
 
-.tabs .tab-quiet {
-  margin-left: auto;
-  border: 0;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
 
-.library-list {
-  display: grid;
-  gap: 6px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  max-height: 300px;
-  overflow-y: auto;
-}
 
-.library-list button {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  padding: 6px;
-  border: 1.6px solid transparent;
-  border-radius: 12px 9px 13px 10px;
-  background: none;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-}
 
-.library-list button:hover {
-  border-color: var(--line);
-  background: var(--paper-sunk);
-}
 
-.library-list img {
-  width: 40px;
-  height: 40px;
-  flex: none;
-  border-radius: 8px;
-  object-fit: cover;
-}
 
-.library-list span {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
 
-.library-list small {
-  color: var(--ink-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
-.library-add {
-  margin-left: auto;
-  font-size: 1.2rem;
-  color: var(--ink-muted);
-}
 
 /* ---- Phones get the real design, not a squeezed desktop ---- */
 
@@ -1519,13 +1432,7 @@ div.queue-play {
   font-size: 0.82rem;
 }
 
-.source-card h3 {
-  font-size: 1.15rem;
-}
 
-.sync-full { color: var(--marker-mint); }
-.sync-preview { color: var(--marker-sun); }
-.sync-none { color: var(--ink-muted); }
 
 .youtube-player iframe,
 .youtube-player > div {
@@ -1533,4 +1440,10 @@ div.queue-play {
   min-height: 300px;
   border: 0;
   border-radius: 14px;
+}
+
+.sources-note {
+  margin-top: 16px;
+  text-align: center;
+  color: var(--marker-coral);
 }

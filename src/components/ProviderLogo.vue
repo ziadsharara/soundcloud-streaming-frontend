@@ -9,7 +9,7 @@ import { computed } from 'vue'
  * usage rules; swap these for the approved assets if this ever goes commercial.
  *
  * Deliberately the one place brand colour overrides the paper-and-ink palette: a logo that is not
- * its own colour stops being recognisable, which defeats the point of drawing it.
+ * its own colour stops being recognisable, which is the only reason it is on the page.
  */
 const LOGOS = {
   soundcloud: {
@@ -31,24 +31,10 @@ const LOGOS = {
       '<rect x="1" y="4.5" width="22" height="15" rx="4.6"/>'
       + '<path d="M10 8.8 15.8 12 10 15.2z" fill="#fff"/>',
   },
-  spotify: {
-    brand: '#1db954',
-    svg:
-      '<circle cx="12" cy="12" r="11"/>'
-      + '<path d="M6.3 9.2c3.8-1.1 8.4-.7 11.6 1.2M7 12.7c3.2-.9 6.9-.6 9.6 1.1M7.6 16c2.5-.7 5.4-.4 7.5.9"'
-      + ' fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round"/>',
-  },
-  anghami: {
-    brand: '#7b2ff7',
-    svg:
-      '<circle cx="12" cy="12" r="11"/>'
-      + '<path d="M7.2 17.2 12 6.4l4.8 10.8M9.2 13.8h5.6" fill="none" stroke="#fff" stroke-width="1.7"'
-      + ' stroke-linecap="round" stroke-linejoin="round"/>',
-  },
 }
 
 const props = defineProps({
-  // A logo key: soundcloud, youtubemusic, youtube, spotify or anghami.
+  // A logo key: soundcloud, youtubemusic or youtube.
   logo: { type: String, required: true },
   label: { type: String, default: '' },
   size: { type: Number, default: 20 },

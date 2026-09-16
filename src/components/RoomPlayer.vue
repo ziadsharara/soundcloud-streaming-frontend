@@ -1,8 +1,6 @@
 <script setup>
 import { computed, ref } from 'vue'
-import AnghamiCard from './AnghamiCard.vue'
 import SoundCloudPlayer from './SoundCloudPlayer.vue'
-import SpotifyPlayer from './SpotifyPlayer.vue'
 import YouTubePlayer from './YouTubePlayer.vue'
 import { detectProvider } from '../providers'
 
@@ -60,26 +58,6 @@ defineExpose({
     @pause="emit('pause')"
     @seek="emit('seek')"
     @finish="emit('finish')"
-    @error="emit('error', $event)"
-  />
-  <SpotifyPlayer
-    v-else-if="provider === 'spotify'"
-    ref="inner"
-    :initial-url="initialUrl"
-    :auto-play="autoPlay"
-    @ready="emit('ready')"
-    @play="emit('play')"
-    @pause="emit('pause')"
-    @seek="emit('seek')"
-    @finish="emit('finish')"
-    @error="emit('error', $event)"
-  />
-  <AnghamiCard
-    v-else-if="provider === 'anghami'"
-    ref="inner"
-    :initial-url="initialUrl"
-    :auto-play="autoPlay"
-    @ready="emit('ready')"
     @error="emit('error', $event)"
   />
 </template>
