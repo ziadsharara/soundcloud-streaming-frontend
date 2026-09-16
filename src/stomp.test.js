@@ -37,6 +37,8 @@ describe('room realtime connection', () => {
     expect(mocks.client.subscribe.mock.calls.map(([destination]) => destination)).toEqual([
       '/topic/rooms/ABC123/members',
       '/topic/rooms/ABC123/chat',
+      '/topic/rooms/ABC123/receipts',
+      '/topic/rooms/ABC123/typing',
       '/topic/rooms/ABC123/queue',
       '/topic/rooms/ABC123/closed',
       '/topic/rooms/ABC123/playback',
@@ -67,6 +69,21 @@ describe('room realtime connection', () => {
     const bodies = mocks.client.publish.mock.calls.map(([frame]) => JSON.parse(frame.body))
     expect(bodies[0]).toEqual({ kind: 'TEXT', hostToken: 'token', text: 'hi' })
     expect(bodies[1]).toEqual({ kind: 'STICKER', hostToken: 'token', stickerId: 'fire' })
+  })
+
+  it('sends receipts, typing and listening state on their own destinations', () => {
+    const connection = connectToRoom('ABC123', {})
+
+    connection.sendReceipt({ read: true, throughServerTime: 42 })
+    connection.sendTyping(true)
+    connection.sendListening(false)
+
+    const sent = mocks.client.publish.mock.calls.map(([frame]) => [frame.destination, JSON.parse(frame.body)])
+    expect(sent).toEqual([
+      ['/app/rooms/ABC123/receipt', { read: true, throughServerTime: 42 }],
+      ['/app/rooms/ABC123/typing', { typing: true }],
+      ['/app/rooms/ABC123/status', { listening: false }],
+    ])
   })
 
   it('surfaces WebSocket failures while automatic reconnect is active', () => {

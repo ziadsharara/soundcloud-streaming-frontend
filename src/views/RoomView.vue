@@ -5,10 +5,14 @@ import AvatarMark from '../components/AvatarMark.vue'
 import ChatPanel from '../components/ChatPanel.vue'
 import JoinGate from '../components/JoinGate.vue'
 import MemberList from '../components/MemberList.vue'
+import PressPlayCard from '../components/PressPlayCard.vue'
 import RoomPlayer from '../components/RoomPlayer.vue'
 import { api, clearHostToken, getHostToken } from '../api'
 import { getIdentity, setIdentity } from '../identity'
 import { selectLatestPlayback } from '../playback'
+import { notifyChatMessage } from '../notifications'
+import { latestServerTime } from '../receipts'
+import { applyTyping, pruneTyping, typingLabel, typingNames } from '../typing'
 import { mergeChatMessages } from '../roomState'
 import { connectToRoom } from '../stomp'
 import ProviderLogo from '../components/ProviderLogo.vue'
@@ -35,11 +39,16 @@ const status = ref('connecting')
 const members = ref([])
 const playback = ref(null)
 const chat = ref([])
+const receipts = ref({})
+const typingPeople = ref({})
 let clockOffset = 0 // client clock minus server clock
 
 // The host named themselves when they made the room; guests pick a name and face at the door.
 const identity = ref(getIdentity())
 const joined = ref(isHost)
+const myId = identity.value.memberId
+/** Whether *our* audio is actually running: present in the room is not the same as listening. */
+const selfListening = ref(false)
 
 const player = ref(null)
 const playerUrl = ref('')
@@ -69,6 +78,7 @@ let broadcasting = false
 let broadcastQueued = false
 let broadcastRetryTimer = null
 let inviteFeedbackTimer = null
+let typingTimer = null
 
 const statusLabel = computed(
   () => ({ connected: 'Live', connecting: 'Connecting…', disconnected: 'Reconnecting…' })[status.value],
@@ -76,6 +86,7 @@ const statusLabel = computed(
 const artwork = computed(() => largeArtwork(playback.value?.artworkUrl))
 const activeQueueUrl = computed(() => trackQueue.value[activeQueueIndex.value] || '')
 const nowPlaying = computed(() => providerBadge(playback.value?.trackUrl || ''))
+const typingIndicator = computed(() => typingLabel(typingNames(typingPeople.value, myId)))
 const inviteButtonLabel = computed(
   () => inviteFeedback.value || (canNativeShare ? 'Share invite' : 'Copy invite link'),
 )
@@ -117,6 +128,7 @@ function applySnapshot(data) {
   members.value = data.members || []
   playback.value = selectLatestPlayback(playback.value, data.playback)
   chat.value = mergeChatMessages(chat.value, data.chat, MAX_CHAT)
+  receipts.value = data.receipts && typeof data.receipts === 'object' ? data.receipts : {}
   if (!isHost) applyQueueState(data.queue)
 }
 
@@ -136,13 +148,15 @@ function restoreQueuedSource() {
 }
 
 function joinRoom(chosen) {
-  identity.value = chosen
+  // Keep the stable member id: the gate only chooses a name and a face.
+  identity.value = { ...identity.value, ...chosen }
   setIdentity(chosen)
   joined.value = true
   start()
 }
 
 function start() {
+  document.addEventListener('visibilitychange', onVisibilityChange)
   connection = connectToRoom(
     props.id,
     {
@@ -150,6 +164,8 @@ function start() {
         status.value = s
         if (s !== 'connected') return
         realtimeError.value = ''
+        connection?.sendListening(selfListening.value)
+        acknowledgeChat()
         if (isHost) {
           broadcastState()
           broadcastQueue()
@@ -164,21 +180,36 @@ function start() {
       },
       onQueue: applyQueueState,
       onMembers: (list) => (members.value = Array.isArray(list) ? list : []),
-      onChat: (message) => (chat.value = mergeChatMessages(chat.value, [message], MAX_CHAT)),
+      onReceipts: (map) => (receipts.value = map && typeof map === 'object' ? map : {}),
+      onTyping: (notice) => (typingPeople.value = applyTyping(typingPeople.value, notice)),
+      onChat: (message) => {
+        chat.value = mergeChatMessages(chat.value, [message], MAX_CHAT)
+        notifyChatMessage(message, { roomName: room.value?.name, myId })
+        acknowledgeChat()
+      },
       onClosed: (payload) => {
         closed.value = true
         closedReason.value = payload?.reason === 'empty' ? 'empty' : 'host'
         teardown()
       },
     },
-    () => ({ hostToken, name: identity.value.name, avatarId: identity.value.avatarId }),
+    () => ({
+      hostToken,
+      memberId: myId,
+      name: identity.value.name,
+      avatarId: identity.value.avatarId,
+    }),
   )
 
   timer = isHost ? setInterval(broadcastState, HEARTBEAT_MS) : setInterval(syncToHost, SYNC_INTERVAL_MS)
+  // Indicators expire here rather than on the server, so a lost "stopped typing" self-heals.
+  typingTimer = setInterval(() => (typingPeople.value = pruneTyping(typingPeople.value)), 1500)
 }
 
 function teardown() {
+  document.removeEventListener('visibilitychange', onVisibilityChange)
   clearInterval(timer)
+  clearInterval(typingTimer)
   clearTimeout(broadcastRetryTimer)
   clearTimeout(inviteFeedbackTimer)
   broadcastQueued = false
@@ -235,7 +266,16 @@ function retryPlayer() {
   playerKey.value += 1
 }
 
+function setListening(listening) {
+  if (selfListening.value === listening) return
+  selfListening.value = listening
+  connection?.sendListening(listening)
+}
+
 function onPlayerEvent(type) {
+  // Everyone reports this, host included: it is what the member list means by "listening".
+  if (type === 'play') setListening(true)
+  if (type === 'pause' || type === 'finish') setListening(false)
   if (!isHost) return
   if (type === 'play') hostStarted = true
   if (
@@ -492,6 +532,21 @@ async function retryConnection() {
 const sendChat = (text) => connection?.sendChat({ hostToken, text })
 const sendSticker = (stickerId) => connection?.sendSticker({ hostToken, stickerId })
 
+/**
+ * Tells the room how far we have got through the chat. Reading the newest message implies
+ * reading every message before it, so one timestamp is enough to draw ticks for the whole history.
+ * A hidden tab has received but not read them.
+ */
+function acknowledgeChat() {
+  const through = latestServerTime(chat.value)
+  if (!through || !connection) return
+  connection.sendReceipt({ read: !document.hidden, throughServerTime: through })
+}
+
+function onVisibilityChange() {
+  if (!document.hidden) acknowledgeChat()
+}
+
 function showInviteFeedback(message) {
   inviteFeedback.value = message
   clearTimeout(inviteFeedbackTimer)
@@ -671,6 +726,8 @@ async function shareInvite() {
             </ol>
           </section>
 
+          <PressPlayCard v-if="playerUrl && !selfListening" :hosting="isHost" />
+
           <section v-if="playerUrl" class="card sketch-frame-2 player-card">
             <RoomPlayer
               :key="`${playerProvider}-${playerKey}`"
@@ -708,9 +765,14 @@ async function shareInvite() {
           <MemberList :members="members" />
           <ChatPanel
             :messages="chat"
+            :members="members"
+            :receipts="receipts"
+            :my-id="myId"
             :connected="status === 'connected'"
+            :typing-label="typingIndicator"
             @send="sendChat"
             @sticker="sendSticker"
+            @typing="(typing) => connection?.sendTyping(typing)"
           />
         </aside>
       </div>

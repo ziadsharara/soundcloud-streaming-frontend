@@ -1269,17 +1269,25 @@ div.queue-play {
   background: var(--paper-raised);
 }
 
+/* Input on its own row: sharing one row with the tools and Send cropped the placeholder. */
 .chat-form {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 8px;
   margin-top: 12px;
 }
 
 .chat-form input {
-  flex: 1;
+  width: 100%;
   min-width: 0;
-  min-height: 40px;
+  min-height: 42px;
+}
+
+.chat-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .chat-tools {
@@ -1487,4 +1495,195 @@ div.queue-play {
   background: var(--paper-raised);
   box-shadow: 4px 4px 0 var(--shadow-ink);
   font-size: 0.88rem;
+}
+
+/* ---- Chat header, ticks and listening state ---- */
+
+.chat-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.chat-head h3 {
+  margin: 0;
+}
+
+.chat-head .tool-button svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ticks {
+  align-self: flex-end;
+  flex: none;
+  margin-left: auto;
+  padding-bottom: 2px;
+}
+
+.ticks svg {
+  width: 17px;
+  height: 11px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ticks--sent,
+.ticks--delivered {
+  color: var(--subtle, var(--ink-muted));
+  opacity: 0.75;
+}
+
+/* Read is the one state worth a colour — the same reason other apps turn them blue. */
+.ticks--read {
+  color: var(--marker-sky);
+  opacity: 1;
+}
+
+.member-list li {
+  gap: 9px;
+}
+
+.member-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+
+.member-list li.is-listening .member-state {
+  color: var(--marker-mint);
+}
+
+.member-bars {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 1.5px;
+  height: 11px;
+}
+
+.member-bars i {
+  display: block;
+  width: 2.5px;
+  height: 100%;
+  border-radius: 2px;
+  background: currentColor;
+  animation: member-bar 1s ease-in-out infinite;
+}
+
+.member-bars i:nth-child(2) { animation-delay: 0.15s; }
+.member-bars i:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes member-bar {
+  0%, 100% { transform: scaleY(0.45); }
+  50% { transform: scaleY(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .member-bars i { animation: none; transform: scaleY(0.7); }
+}
+
+/* ---- Press play ---- */
+
+.press-play {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.press-play-art {
+  flex: none;
+  width: 190px;
+  margin: 0;
+  color: var(--ink);
+}
+
+.press-play-art svg {
+  width: 100%;
+  height: auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.press-play-copy h3 {
+  margin-bottom: 6px;
+}
+
+.press-play-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  color: var(--marker-coral);
+}
+
+.press-play-arrow {
+  transform: rotate(84deg);
+}
+
+@media (max-width: 620px) {
+  .press-play {
+    flex-direction: column;
+    text-align: center;
+  }
+
+  .press-play-art {
+    width: 150px;
+  }
+}
+
+/* ---- Typing indicator ---- */
+
+.typing-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 0;
+  font-size: 0.86rem;
+  color: var(--ink-muted);
+}
+
+.typing-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.typing-dots i {
+  display: block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: typing-dot 1.2s ease-in-out infinite;
+}
+
+.typing-dots i:nth-child(2) { animation-delay: 0.18s; }
+.typing-dots i:nth-child(3) { animation-delay: 0.36s; }
+
+@keyframes typing-dot {
+  0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-2px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .typing-dots i { animation: none; opacity: 0.7; }
 }
