@@ -277,8 +277,17 @@ svg {
 .doodle-underline {
   position: absolute;
   left: 0;
-  bottom: -0.32em;
+  bottom: -0.22em;
   pointer-events: none;
+}
+
+/*
+ * The underline hangs below the last line of the headline, so the headline needs room underneath
+ * it. Without this the mark runs straight through the paragraph below — the one thing a drawn
+ * mark must never do.
+ */
+.hero-copy h1 {
+  margin-bottom: 26px;
 }
 
 .card {
