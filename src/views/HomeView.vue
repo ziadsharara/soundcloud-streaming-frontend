@@ -3,7 +3,7 @@ import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import AvatarMark from '../components/AvatarMark.vue'
 import Doodle from '../components/Doodle.vue'
-import { api, clearHostToken, getHostToken, setHostToken } from '../api'
+import { api, clearHostToken, getHostToken, setHostToken, setRoomKey } from '../api'
 import { AVATARS } from '../avatars'
 import { getIdentity, setIdentity } from '../identity'
 import ProviderLogo from '../components/ProviderLogo.vue'
@@ -24,6 +24,8 @@ const roomName = ref('')
 const hostName = ref(saved.name)
 const hostAvatarId = ref(saved.avatarId)
 const sourceUrl = ref('')
+const isPrivate = ref(false)
+const password = ref('')
 const creating = ref(false)
 const createError = ref('')
 
@@ -69,14 +71,21 @@ async function createRoom() {
     createError.value = 'Paste a SoundCloud or YouTube link — or leave it empty.'
     return
   }
+  if (isPrivate.value && password.value.trim().length < 4) {
+    createError.value = 'A private room needs a password of at least 4 characters.'
+    return
+  }
   creating.value = true
   try {
-    const { room, hostToken } = await api.createRoom(
+    const { room, hostToken, accessKey } = await api.createRoom(
       roomName.value.trim(),
       hostName.value.trim(),
       hostAvatarId.value,
+      isPrivate.value ? password.value.trim() : undefined,
     )
     setHostToken(room.id, hostToken)
+    // The host keeps the key too, or they would be locked out of their own room.
+    if (accessKey) setRoomKey(room.id, accessKey)
     setIdentity({ name: hostName.value.trim(), avatarId: hostAvatarId.value })
     if (url) {
       try {
@@ -200,6 +209,45 @@ onBeforeUnmount(() => clearInterval(timer))
           <div class="field-group">
             <label for="source-url">First link <span class="muted">(optional)</span></label>
             <input id="source-url" v-model="sourceUrl" type="url" placeholder="https://soundcloud.com/artist/song" autocomplete="url" />
+          </div>
+
+          <fieldset class="visibility-picker">
+            <legend>Who can walk in</legend>
+            <div class="visibility-choices">
+              <button
+                type="button"
+                class="visibility-choice"
+                :class="{ chosen: !isPrivate }"
+                :aria-pressed="!isPrivate"
+                @click="isPrivate = false"
+              >
+                <strong>Public</strong>
+                <small>Listed on the home page</small>
+              </button>
+              <button
+                type="button"
+                class="visibility-choice"
+                :class="{ chosen: isPrivate }"
+                :aria-pressed="isPrivate"
+                @click="isPrivate = true"
+              >
+                <strong>Private</strong>
+                <small>Unlisted, needs a password</small>
+              </button>
+            </div>
+          </fieldset>
+
+          <div v-if="isPrivate" class="field-group">
+            <label for="room-password">Room password</label>
+            <input
+              id="room-password"
+              v-model="password"
+              type="password"
+              autocomplete="new-password"
+              placeholder="Share this with your friends"
+              maxlength="100"
+            />
+            <p class="hint">Anyone with the code still needs this to get in.</p>
           </div>
 
           <p v-if="createError" class="field-error">{{ createError }}</p>

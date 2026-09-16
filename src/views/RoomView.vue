@@ -5,9 +5,10 @@ import AvatarMark from '../components/AvatarMark.vue'
 import ChatPanel from '../components/ChatPanel.vue'
 import JoinGate from '../components/JoinGate.vue'
 import MemberList from '../components/MemberList.vue'
+import RoomLockGate from '../components/RoomLockGate.vue'
 import PressPlayCard from '../components/PressPlayCard.vue'
 import RoomPlayer from '../components/RoomPlayer.vue'
-import { api, clearHostToken, getHostToken } from '../api'
+import { api, clearHostToken, getHostToken, setRoomKey } from '../api'
 import { getIdentity, setIdentity } from '../identity'
 import { selectLatestPlayback } from '../playback'
 import { notifyChatMessage } from '../notifications'
@@ -46,6 +47,10 @@ let clockOffset = 0 // client clock minus server clock
 // The host named themselves when they made the room; guests pick a name and face at the door.
 const identity = ref(getIdentity())
 const joined = ref(isHost)
+// A private room answers with a locked summary until its password has been answered.
+const locked = ref(false)
+const unlocking = ref(false)
+const unlockError = ref('')
 const myId = identity.value.memberId
 /** Whether *our* audio is actually running: present in the room is not the same as listening. */
 const selfListening = ref(false)
@@ -105,6 +110,11 @@ watch(volume, (v) => player.value?.setVolume(v))
 onMounted(async () => {
   try {
     const data = await api.getRoom(props.id)
+    if (data.locked) {
+      room.value = data
+      locked.value = true
+      return
+    }
     applySnapshot(data)
     clockOffset = Date.now() - data.serverNow
   } catch (e) {
@@ -144,6 +154,28 @@ function restoreQueuedSource() {
     }
   } catch {
     // Ignore unavailable or malformed session storage.
+  }
+}
+
+async function unlockRoom(password) {
+  unlocking.value = true
+  unlockError.value = ''
+  try {
+    const { accessKey } = await api.unlockRoom(props.id, password)
+    setRoomKey(props.id, accessKey)
+    const data = await api.getRoom(props.id)
+    if (data.locked) {
+      unlockError.value = 'That password does not open this room.'
+      return
+    }
+    locked.value = false
+    applySnapshot(data)
+    clockOffset = Date.now() - data.serverNow
+    if (isHost) start()
+  } catch (e) {
+    unlockError.value = e.message
+  } finally {
+    unlocking.value = false
   }
 }
 
@@ -602,8 +634,8 @@ async function shareInvite() {
       <header class="room-header">
         <div class="room-title">
           <p class="eyebrow">
-            <span class="live-dot" :class="`live-dot--${status}`"></span>
-            {{ isHost ? 'You are hosting' : 'Listening along' }}
+            <span v-if="!locked" class="live-dot" :class="`live-dot--${status}`"></span>
+            {{ locked ? 'Private room' : isHost ? 'You are hosting' : 'Listening along' }}
           </p>
           <h1>{{ room.name }}</h1>
           <div class="meta">
@@ -611,13 +643,16 @@ async function shareInvite() {
               <AvatarMark :id="room.hostAvatarId" :size="26" flat />
               {{ room.hostName }}
             </span>
-            <span class="pill" :class="`pill--${status}`">{{ statusLabel }}</span>
-            <span>{{ members.length }} in the room</span>
+            <template v-if="!locked">
+              <span class="pill" :class="`pill--${status}`">{{ statusLabel }}</span>
+              <span>{{ members.length }} in the room</span>
+            </template>
+            <span v-if="room.privateRoom" class="pill">Private</span>
             <span>Code <strong class="mono">{{ room.id }}</strong></span>
           </div>
         </div>
         <div class="actions">
-          <button class="btn btn--ghost" type="button" @click="shareInvite">{{ inviteButtonLabel }}</button>
+          <button v-if="!locked" class="btn btn--ghost" type="button" @click="shareInvite">{{ inviteButtonLabel }}</button>
           <button v-if="isHost" class="btn btn--danger" type="button" @click="endStream">End stream</button>
           <RouterLink v-else class="btn btn--ghost" to="/">Leave</RouterLink>
         </div>
@@ -629,8 +664,18 @@ async function shareInvite() {
         <button class="btn btn--ghost btn--compact" type="button" @click="retryConnection">Reconnect now</button>
       </div>
 
+      <RoomLockGate
+        v-if="locked"
+        :room-name="room.name"
+        :host-name="room.hostName"
+        :host-avatar-id="room.hostAvatarId"
+        :error="unlockError"
+        :checking="unlocking"
+        @unlock="unlockRoom"
+      />
+
       <JoinGate
-        v-if="!joined"
+        v-else-if="!joined"
         :room-name="room.name"
         :host-name="room.hostName"
         @join="joinRoom"

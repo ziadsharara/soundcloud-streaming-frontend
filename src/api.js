@@ -44,9 +44,15 @@ async function request(path, { method = 'GET', body, headers = {} } = {}) {
 
 export const api = {
   listRooms: () => request('/rooms'),
-  getRoom: (id) => request(`/rooms/${encodeURIComponent(id)}`),
-  createRoom: (name, hostName, hostAvatarId) =>
-    request('/rooms', { method: 'POST', body: { name, hostName, hostAvatarId } }),
+  // A private room answers with a "locked" summary until the key goes with the request.
+  getRoom: (id) => {
+    const key = getRoomKey(id)
+    return request(`/rooms/${encodeURIComponent(id)}`, { headers: key ? { 'X-Room-Key': key } : {} })
+  },
+  createRoom: (name, hostName, hostAvatarId, password) =>
+    request('/rooms', { method: 'POST', body: { name, hostName, hostAvatarId, password } }),
+  unlockRoom: (id, password) =>
+    request(`/rooms/${encodeURIComponent(id)}/unlock`, { method: 'POST', body: { password } }),
   closeRoom: (id, hostToken) =>
     request(`/rooms/${encodeURIComponent(id)}`, { method: 'DELETE', headers: { 'X-Host-Token': hostToken } }),
 }
@@ -69,6 +75,12 @@ function storage(fn, fallback) {
 }
 
 const tokenKey = (roomId) => `soundstream:host:${roomId}`
+const roomKeyName = (roomId) => `soundstream:key:${roomId}`
+
+/** The key a private room hands back once its password has been answered. */
+export const getRoomKey = (roomId) => storage((s) => s.getItem(roomKeyName(roomId)), null)
+export const setRoomKey = (roomId, key) => storage((s) => s.setItem(roomKeyName(roomId), key))
+export const clearRoomKey = (roomId) => storage((s) => s.removeItem(roomKeyName(roomId)))
 
 export const getHostToken = (roomId) => storage((s) => s.getItem(tokenKey(roomId)), null)
 export const setHostToken = (roomId, token) => storage((s) => s.setItem(tokenKey(roomId), token))

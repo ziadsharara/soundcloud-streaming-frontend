@@ -17,7 +17,10 @@ const mocks = vi.hoisted(() => {
 })
 
 vi.mock('@stomp/stompjs', () => ({ Client: mocks.Client }))
-vi.mock('./api', () => ({ webSocketUrl: () => 'wss://api.example.com/ws' }))
+vi.mock('./api', () => ({
+  webSocketUrl: () => 'wss://api.example.com/ws',
+  getRoomKey: () => 'room-key-for-tests',
+}))
 
 import { connectToRoom } from './stomp'
 
@@ -44,6 +47,14 @@ describe('room realtime connection', () => {
       '/topic/rooms/ABC123/playback',
     ])
     expect(onStatus).toHaveBeenCalledWith('connected')
+  })
+
+  it('carries the private-room key on connect, where the server checks it', () => {
+    connectToRoom('ABC123', {})
+
+    expect(mocks.Client).toHaveBeenCalledWith(
+      expect.objectContaining({ connectHeaders: { roomKey: 'room-key-for-tests' } }),
+    )
   })
 
   it('announces who joined on every connect, so a reconnect restores the member', () => {

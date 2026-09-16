@@ -1,5 +1,5 @@
 import { Client } from '@stomp/stompjs'
-import { webSocketUrl } from './api'
+import { getRoomKey, webSocketUrl } from './api'
 
 /**
  * Opens a STOMP connection for one room and wires its topics to callbacks.
@@ -14,7 +14,13 @@ export function connectToRoom(
   { onStatus, onPlayback, onQueue, onMembers, onChat, onReceipts, onTyping, onClosed, onError },
   identity = () => ({}),
 ) {
-  const client = new Client({ brokerURL: webSocketUrl(), reconnectDelay: 3000 })
+  // The key travels on CONNECT: the server refuses subscriptions to a private room without it.
+  const roomKey = getRoomKey(roomId)
+  const client = new Client({
+    brokerURL: webSocketUrl(),
+    reconnectDelay: 3000,
+    connectHeaders: roomKey ? { roomKey } : {},
+  })
   const json = (handler) => (message) => handler?.(JSON.parse(message.body))
 
   const publish = (destination, body) => {
