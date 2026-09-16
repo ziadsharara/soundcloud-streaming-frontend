@@ -8,12 +8,13 @@ const storedTheme = (() => {
   }
 })()
 
+// Paper and ink is a light-first system: dark is an explicit choice, never the fallback.
 const theme = ref(
   storedTheme === 'light' || storedTheme === 'dark'
     ? storedTheme
-    : window.matchMedia?.('(prefers-color-scheme: light)').matches
-      ? 'light'
-      : 'dark',
+    : window.matchMedia?.('(prefers-color-scheme: dark)').matches
+      ? 'dark'
+      : 'light',
 )
 
 function applyTheme() {

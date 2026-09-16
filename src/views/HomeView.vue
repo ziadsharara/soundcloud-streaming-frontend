@@ -1,8 +1,13 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { api, clearHostToken, getHostToken, getNickname, setHostToken, setNickname } from '../api'
-import { isSoundCloudUrl, largeArtwork } from '../soundcloud'
+import AvatarMark from '../components/AvatarMark.vue'
+import Doodle from '../components/Doodle.vue'
+import { api, clearHostToken, getHostToken, setHostToken } from '../api'
+import { AVATARS } from '../avatars'
+import { getIdentity, setIdentity } from '../identity'
+import { PROVIDERS, isSupportedUrl, providerMeta } from '../providers'
+import { largeArtwork } from '../soundcloud'
 import { parseRoomCode } from '../roomCode'
 
 const REFRESH_MS = 10000
@@ -12,11 +17,15 @@ const rooms = ref([])
 const loading = ref(true)
 const listError = ref('')
 const deletingRoomId = ref('')
+
+const saved = getIdentity()
 const roomName = ref('')
-const hostName = ref(getNickname())
+const hostName = ref(saved.name)
+const hostAvatarId = ref(saved.avatarId)
+const sourceUrl = ref('')
 const creating = ref(false)
 const createError = ref('')
-const sourceUrl = ref('')
+
 const code = ref('')
 const joinError = ref('')
 let timer = null
@@ -33,9 +42,7 @@ async function refresh() {
   }
 }
 
-function canDeleteRoom(roomId) {
-  return Boolean(getHostToken(roomId))
-}
+const canDeleteRoom = (roomId) => Boolean(getHostToken(roomId))
 
 async function deleteRoom(room) {
   const hostToken = getHostToken(room.id)
@@ -57,15 +64,19 @@ async function deleteRoom(room) {
 async function createRoom() {
   createError.value = ''
   const url = sourceUrl.value.trim()
-  if (url && !isSoundCloudUrl(url)) {
-    createError.value = 'Paste a valid SoundCloud song, playlist, or album URL.'
+  if (url && !isSupportedUrl(url)) {
+    createError.value = 'Paste a SoundCloud, Spotify or Anghami link — or leave it empty.'
     return
   }
   creating.value = true
   try {
-    const { room, hostToken } = await api.createRoom(roomName.value.trim(), hostName.value.trim())
+    const { room, hostToken } = await api.createRoom(
+      roomName.value.trim(),
+      hostName.value.trim(),
+      hostAvatarId.value,
+    )
     setHostToken(room.id, hostToken)
-    setNickname(hostName.value.trim())
+    setIdentity({ name: hostName.value.trim(), avatarId: hostAvatarId.value })
     if (url) {
       try {
         window.sessionStorage.setItem('soundstream:queued-source', JSON.stringify({ permalinkUrl: url }))
@@ -84,7 +95,7 @@ async function createRoom() {
 function joinByCode() {
   const id = parseRoomCode(code.value)
   if (!id) {
-    joinError.value = 'Enter a valid six-character room code or invite link.'
+    joinError.value = 'Enter a six-character room code or paste an invite link.'
     return
   }
   joinError.value = ''
@@ -102,143 +113,164 @@ onBeforeUnmount(() => clearInterval(timer))
   <main>
     <section class="hero page">
       <div class="hero-copy">
-        <div class="hero-kicker"><span></span> Live listening rooms</div>
-        <h1>Your SoundCloud.<br /><em>One room. One moment.</em></h1>
-        <p>
-          Paste a public SoundCloud song, playlist, or album. Share one room link, press play once, and everyone hears it at the same time.
+        <p class="hand hand-kicker">one room, one moment</p>
+        <h1>
+          Play it once.<br />
+          <span class="underlined">
+            Everyone hears it
+            <Doodle name="underline" :width="230" class="doodle-underline marker-coral" />
+          </span>
+          together.
+        </h1>
+        <p class="lede">
+          Paste a link from SoundCloud, Spotify or Anghami. Share one room code. Your friends land in
+          the same song, at the same second, with a name and a face.
         </p>
         <div class="hero-actions">
-          <a class="btn btn--large" href="#start">Start a room <span>↗</span></a>
-          <a class="btn btn--ghost btn--large" href="#live">
-            <span class="live-dot"></span> Explore live rooms
-          </a>
-        </div>
-        <div class="trust-row">
-          <div class="avatar-stack"><span>Z</span><span>S</span><span>♫</span></div>
-          <p><strong>Real-time playback</strong><br />Synced over a live WebSocket room</p>
+          <a class="btn btn--large" href="#start">Start a room</a>
+          <a class="btn btn--outline btn--large" href="#live">See who is live</a>
+          <Doodle name="arrow" :width="64" class="doodle-hero-arrow marker-coral" />
         </div>
       </div>
 
-      <div class="hero-visual" aria-label="SoundStream live player preview">
-        <div class="orb orb--one"></div><div class="orb orb--two"></div>
-        <div class="mock-player">
-          <div class="mock-top"><span class="live-badge"><i></i> LIVE</span><span>•••</span></div>
-          <div class="vinyl-wrap">
-            <div class="vinyl"><div class="vinyl-label">S</div></div>
-            <div class="sound-bars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
-          </div>
-          <p class="eyebrow">Now streaming</p>
-          <h2>Midnight drive</h2>
+      <figure class="hero-art tilt-r">
+        <div class="hero-art-room sketch-frame sketch-shadow">
+          <p class="eyebrow">Now playing</p>
+          <h3>Midnight drive</h3>
           <p class="muted">SoundStream Radio</p>
-          <div class="mock-progress"><span></span></div>
-          <div class="mock-time"><span>1:42</span><span>4:08</span></div>
-          <div class="mock-controls"><button>↶</button><button class="mock-play">Ⅱ</button><button>↷</button></div>
+          <div class="hero-bars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          <ul class="hero-members">
+            <li v-for="avatar in AVATARS.slice(0, 5)" :key="avatar.id">
+              <AvatarMark :id="avatar.id" :size="34" />
+            </li>
+          </ul>
+          <p class="hand hero-note">everyone on the same bar</p>
         </div>
-        <div class="floating-card floating-card--listeners">
-          <span class="floating-icon">♬</span><div><strong>24 listeners</strong><small>Listening together</small></div>
-        </div>
-        <div class="floating-card floating-card--sync">
-          <span class="sync-check">✓</span><div><strong>Perfectly synced</strong><small>Live for everyone</small></div>
-        </div>
+      </figure>
+    </section>
+
+    <section id="start" class="page section">
+      <div class="section-heading">
+        <p class="eyebrow">Start listening together</p>
+        <h2>Open a room, or walk into one</h2>
+      </div>
+
+      <div class="launch-grid">
+        <form class="card sketch-frame sketch-shadow" @submit.prevent="createRoom">
+          <h3>Host a room</h3>
+          <p class="muted">You hold the play button. Everyone else follows.</p>
+
+          <div class="field-group">
+            <label for="room-name">Room name</label>
+            <input id="room-name" v-model="roomName" placeholder="Late night lo-fi" maxlength="60" required />
+          </div>
+          <div class="field-group">
+            <label for="host-name">Your name</label>
+            <input id="host-name" v-model="hostName" placeholder="What should we call you?" maxlength="40" required />
+          </div>
+
+          <fieldset class="avatar-picker">
+            <legend>Your face in the room</legend>
+            <div class="avatar-grid">
+              <button
+                v-for="avatar in AVATARS"
+                :key="avatar.id"
+                type="button"
+                class="avatar-choice"
+                :class="{ chosen: avatar.id === hostAvatarId }"
+                :aria-pressed="avatar.id === hostAvatarId"
+                :title="avatar.label"
+                @click="hostAvatarId = avatar.id"
+              >
+                <AvatarMark :id="avatar.id" :size="40" />
+              </button>
+            </div>
+          </fieldset>
+
+          <div class="field-group">
+            <label for="source-url">First link <span class="muted">(optional)</span></label>
+            <input id="source-url" v-model="sourceUrl" type="url" placeholder="https://soundcloud.com/artist/song" autocomplete="url" />
+          </div>
+
+          <p v-if="createError" class="field-error">{{ createError }}</p>
+          <button class="btn btn--large btn--full" type="submit" :disabled="creating">
+            {{ creating ? 'Opening your room…' : 'Create the room' }}
+          </button>
+        </form>
+
+        <form class="card sketch-frame-2 sketch-shadow tilt-l" @submit.prevent="joinByCode">
+          <h3>Join friends</h3>
+          <p class="muted">Paste the invite link or type the six-character code.</p>
+          <div class="field-group">
+            <label for="code">Invite link or room code</label>
+            <input id="code" v-model="code" class="mono" placeholder="K7QH2M" autocomplete="off" required />
+          </div>
+          <p v-if="joinError" class="field-error">{{ joinError }}</p>
+          <button class="btn btn--outline btn--large btn--full" type="submit">Join the room</button>
+          <p class="hand">no account, ever</p>
+        </form>
       </div>
     </section>
 
-    <section id="start" class="launch-section">
-      <div class="page">
-        <div class="section-heading section-heading--center">
-          <p class="eyebrow">Start listening together</p>
-          <h2>Go live in seconds</h2>
-          <p>Open a room for your friends or jump into one with an invite code.</p>
-        </div>
-
-        <div class="launch-grid">
-          <form class="card launch-card launch-card--primary" @submit.prevent="createRoom">
-            <div class="card-icon card-icon--orange">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8.5 16.5a6 6 0 0 1 0-9m7 0a6 6 0 0 1 0 9M5.5 19.5a10 10 0 0 1 0-15m13 0a10 10 0 0 1 0 15M12 12h.01" /></svg>
-            </div>
-            <div><h3>Start a live room</h3><p class="muted">You control the music. Everyone else stays in sync.</p></div>
-            <div class="field-group">
-              <label for="room-name">Room name</label>
-              <input id="room-name" v-model="roomName" placeholder="Late night lo-fi" maxlength="60" required />
-            </div>
-            <div class="field-group">
-              <label for="host-name">Your display name</label>
-              <input id="host-name" v-model="hostName" placeholder="DJ you" maxlength="40" required />
-            </div>
-            <div class="field-group">
-              <label for="source-url">SoundCloud song, playlist, or album URL <span class="muted">(optional)</span></label>
-              <input
-                id="source-url"
-                v-model="sourceUrl"
-                type="url"
-                placeholder="https://soundcloud.com/artist/song-or-set"
-                autocomplete="url"
-              />
-              <p class="hint">Only public SoundCloud links are supported. You can also paste one after entering the room.</p>
-            </div>
-            <p v-if="createError" class="field-error">{{ createError }}</p>
-            <button class="btn btn--large btn--full" type="submit" :disabled="creating">
-              {{ creating ? 'Opening your room…' : 'Create live room' }} <span>→</span>
-            </button>
-          </form>
-
-          <form class="card launch-card" @submit.prevent="joinByCode">
-            <div class="card-icon card-icon--purple">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 10l4.5-4.5a3.18 3.18 0 0 1 4.5 4.5l-6 6a3.18 3.18 0 0 1-4.5 0l-1-1m-3-1-1-1a3.18 3.18 0 0 0-4.5 0l-2 2a3.18 3.18 0 0 0 4.5 4.5L11 15m-2-1 6-6" /></svg>
-            </div>
-            <div><h3>Join your friends</h3><p class="muted">Paste an invite link or enter the six-character room code.</p></div>
-            <div class="field-group">
-              <label for="code">Invite link or room code</label>
-              <input id="code" v-model="code" class="mono" placeholder="e.g. K7QH2M" autocomplete="off" required />
-            </div>
-            <p v-if="joinError" class="field-error">{{ joinError }}</p>
-            <div class="join-preview"><span>01</span><i></i><span>02</span><i></i><span>♫</span></div>
-            <button class="btn btn--soft btn--large btn--full" type="submit">Join room <span>→</span></button>
-            <p class="privacy-note"><span>✓</span> No account needed for listeners</p>
-          </form>
-        </div>
+    <section class="page section">
+      <div class="section-heading">
+        <p class="eyebrow">Be honest about the plumbing</p>
+        <h2>What each service actually allows</h2>
+      </div>
+      <div class="source-grid">
+        <article v-for="provider in Object.values(PROVIDERS)" :key="provider.id" class="card sketch-frame-2">
+          <span class="chip" :class="`marker-${provider.marker}`">{{ provider.label }}</span>
+          <h3>
+            {{ provider.sync === 'full' ? 'Full sync' : provider.sync === 'preview' ? 'Preview only' : 'Link only' }}
+          </h3>
+          <p class="muted">{{ provider.syncNote }}</p>
+          <p v-if="provider.id === 'soundcloud'" class="hand">use this one for a real listening party</p>
+        </article>
       </div>
     </section>
 
-    <section class="page library-section">
-      <div class="connect-banner public-link-banner">
-        <div class="connect-cloud" aria-hidden="true">
-          <svg viewBox="0 0 28 16"><path d="M12.4 2.2A6.3 6.3 0 0 1 24.2 6a4.6 4.6 0 1 1-.3 9.2H12.4zM9.9 4.8h1.2v10.4H9.9zm-2.4 2h1.2v8.4H7.5zm-2.4 1.6h1.2v6.8H5.1zm-2.4 1.4h1.2v5.4H2.7zM.3 11h1.2v4.2H.3z" /></svg>
-        </div>
-        <div>
-          <p class="eyebrow">No account required</p>
-          <h2>Stream from a public SoundCloud link</h2>
-          <p>Use a song, playlist, album, or SoundCloud share link. Listeners only need the room URL.</p>
-        </div>
-        <a class="btn btn--light btn--large" href="#start">Paste a SoundCloud URL</a>
-      </div>
-    </section>
-
-    <section id="live" class="live-section page">
+    <section id="live" class="page section">
       <div class="section-heading live-heading">
-        <div><p class="eyebrow">Happening now</p><h2>Live rooms</h2></div>
-        <button class="btn btn--ghost btn--compact" type="button" @click="refresh">Refresh ↻</button>
+        <div>
+          <p class="eyebrow">Happening now</p>
+          <h2>Live rooms</h2>
+        </div>
+        <button class="btn btn--outline btn--compact" type="button" @click="refresh">Refresh</button>
       </div>
+
       <p v-if="listError" class="notice notice--error">Can't reach the server: {{ listError }}</p>
-      <div v-else-if="loading" class="room-grid-list"><div v-for="i in 3" :key="i" class="room-tile skeleton-card"></div></div>
-      <div v-else-if="!rooms.length" class="empty-live">
-        <span class="live-ring"><i></i></span><h3>The stage is yours</h3><p>No rooms are live yet. Start the first session.</p>
+      <p v-else-if="loading" class="muted">Looking for live rooms…</p>
+      <div v-else-if="!rooms.length" class="card sketch-frame empty-live">
+        <Doodle name="scribble" :width="70" class="marker-coral" />
+        <h3>The stage is yours</h3>
+        <p class="muted">No rooms are live yet. Start the first one.</p>
         <a class="btn btn--compact" href="#start">Create a room</a>
       </div>
-      <div v-else class="room-grid-list">
-        <article v-for="room in rooms" :key="room.id" class="room-tile">
+
+      <ul v-else class="room-list">
+        <li v-for="room in rooms" :key="room.id" class="card sketch-frame-2 room-tile">
           <RouterLink :to="{ name: 'room', params: { id: room.id } }" class="room-tile-link">
-            <div class="room-art">
-              <img v-if="room.playback?.artworkUrl" :src="largeArtwork(room.playback.artworkUrl)" alt="" />
-              <span v-else>♫</span>
-              <i class="room-live-dot"></i>
-            </div>
-            <div class="room-tile-copy"><strong>{{ room.name }}</strong><span>{{ room.hostName }}</span><small>{{ room.playback?.title || 'Warming up' }}</small></div>
-            <span class="listener-count">◉ {{ room.listeners }}</span>
+            <img v-if="room.playback?.artworkUrl" :src="largeArtwork(room.playback.artworkUrl)" alt="" class="room-art" />
+            <AvatarMark v-else :id="room.hostAvatarId" :size="56" />
+            <span class="room-tile-copy">
+              <strong>{{ room.name }}</strong>
+              <span class="muted">{{ room.hostName }}</span>
+              <small>
+                <span
+                  v-if="providerMeta(room.playback?.trackUrl || '')"
+                  class="chip chip--small"
+                  :class="`marker-${providerMeta(room.playback?.trackUrl).marker}`"
+                >
+                  {{ providerMeta(room.playback?.trackUrl).label }}
+                </span>
+                {{ room.playback?.title || 'Warming up' }}
+              </small>
+            </span>
+            <span class="listener-count">{{ room.listeners }} in</span>
           </RouterLink>
           <button
             v-if="canDeleteRoom(room.id)"
-            class="room-delete-button"
+            class="quiet-button"
             type="button"
             :disabled="deletingRoomId === room.id"
             :aria-label="`Delete ${room.name}`"
@@ -246,19 +278,32 @@ onBeforeUnmount(() => clearInterval(timer))
           >
             {{ deletingRoomId === room.id ? 'Deleting…' : 'Delete' }}
           </button>
-        </article>
-      </div>
+        </li>
+      </ul>
     </section>
 
-    <section class="how-section">
-      <div class="page">
-        <div class="section-heading section-heading--center"><p class="eyebrow">How it works</p><h2>Three steps. Zero delay drama.</h2></div>
-        <div class="steps-grid">
-          <article><span>1</span><div class="step-icon">♬</div><h3>Paste the soundtrack</h3><p>Use a public SoundCloud song, playlist, album, or share URL.</p></article>
-          <article><span>2</span><div class="step-icon">↗</div><h3>Share one link</h3><p>Friends join from any browser. They do not need a SoundStream account.</p></article>
-          <article><span>3</span><div class="step-icon">≋</div><h3>Stay in sync</h3><p>Play, pause, seek, or skip. Every listener follows the host automatically.</p></article>
-        </div>
+    <section class="page section">
+      <div class="section-heading">
+        <p class="eyebrow">How it works</p>
+        <h2>Three steps, no accounts</h2>
       </div>
+      <ol class="steps">
+        <li>
+          <span class="step-number hand">1</span>
+          <h3>Paste the soundtrack</h3>
+          <p class="muted">A song, playlist or album link. SoundCloud keeps everyone in true sync.</p>
+        </li>
+        <li>
+          <span class="step-number hand">2</span>
+          <h3>Share one code</h3>
+          <p class="muted">Friends pick a name and a face, then they are in. Nothing to install.</p>
+        </li>
+        <li>
+          <span class="step-number hand">3</span>
+          <h3>Press play once</h3>
+          <p class="muted">Play, pause, seek or skip — the room follows you, and drift heals itself.</p>
+        </li>
+      </ol>
     </section>
   </main>
 </template>

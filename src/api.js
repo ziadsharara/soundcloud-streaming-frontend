@@ -45,7 +45,8 @@ async function request(path, { method = 'GET', body, headers = {} } = {}) {
 export const api = {
   listRooms: () => request('/rooms'),
   getRoom: (id) => request(`/rooms/${encodeURIComponent(id)}`),
-  createRoom: (name, hostName) => request('/rooms', { method: 'POST', body: { name, hostName } }),
+  createRoom: (name, hostName, hostAvatarId) =>
+    request('/rooms', { method: 'POST', body: { name, hostName, hostAvatarId } }),
   closeRoom: (id, hostToken) =>
     request(`/rooms/${encodeURIComponent(id)}`, { method: 'DELETE', headers: { 'X-Host-Token': hostToken } }),
 }
@@ -72,6 +73,3 @@ const tokenKey = (roomId) => `soundstream:host:${roomId}`
 export const getHostToken = (roomId) => storage((s) => s.getItem(tokenKey(roomId)), null)
 export const setHostToken = (roomId, token) => storage((s) => s.setItem(tokenKey(roomId), token))
 export const clearHostToken = (roomId) => storage((s) => s.removeItem(tokenKey(roomId)))
-
-export const getNickname = () => storage((s) => s.getItem('soundstream:nickname'), '') || ''
-export const setNickname = (name) => storage((s) => s.setItem('soundstream:nickname', name))

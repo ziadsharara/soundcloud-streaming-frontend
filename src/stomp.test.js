@@ -35,13 +35,38 @@ describe('room realtime connection', () => {
     mocks.client.onConnect()
 
     expect(mocks.client.subscribe.mock.calls.map(([destination]) => destination)).toEqual([
-      '/topic/rooms/ABC123/listeners',
+      '/topic/rooms/ABC123/members',
       '/topic/rooms/ABC123/chat',
       '/topic/rooms/ABC123/queue',
       '/topic/rooms/ABC123/closed',
       '/topic/rooms/ABC123/playback',
     ])
     expect(onStatus).toHaveBeenCalledWith('connected')
+  })
+
+  it('announces who joined on every connect, so a reconnect restores the member', () => {
+    const identity = vi.fn(() => ({ name: 'Ziad', avatarId: 'vinyl', hostToken: 'token' }))
+
+    connectToRoom('ABC123', {}, identity)
+    mocks.client.onConnect()
+    mocks.client.onConnect()
+
+    const joins = mocks.client.publish.mock.calls.filter(
+      ([frame]) => frame.destination === '/app/rooms/ABC123/join',
+    )
+    expect(joins).toHaveLength(2)
+    expect(JSON.parse(joins[0][0].body)).toEqual({ name: 'Ziad', avatarId: 'vinyl', hostToken: 'token' })
+  })
+
+  it('tags chat and sticker messages with their kind', () => {
+    const connection = connectToRoom('ABC123', {})
+
+    connection.sendChat({ hostToken: 'token', text: 'hi' })
+    connection.sendSticker({ hostToken: 'token', stickerId: 'fire' })
+
+    const bodies = mocks.client.publish.mock.calls.map(([frame]) => JSON.parse(frame.body))
+    expect(bodies[0]).toEqual({ kind: 'TEXT', hostToken: 'token', text: 'hi' })
+    expect(bodies[1]).toEqual({ kind: 'STICKER', hostToken: 'token', stickerId: 'fire' })
   })
 
   it('surfaces WebSocket failures while automatic reconnect is active', () => {

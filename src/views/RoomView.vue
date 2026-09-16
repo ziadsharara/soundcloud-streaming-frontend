@@ -1,18 +1,19 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import SoundCloudPlayer from '../components/SoundCloudPlayer.vue'
-import { api, clearHostToken, getHostToken, getNickname, setNickname } from '../api'
+import AvatarMark from '../components/AvatarMark.vue'
+import ChatPanel from '../components/ChatPanel.vue'
+import JoinGate from '../components/JoinGate.vue'
+import MemberList from '../components/MemberList.vue'
+import RoomPlayer from '../components/RoomPlayer.vue'
+import SpotifyLibrary from '../components/SpotifyLibrary.vue'
+import { api, clearHostToken, getHostToken } from '../api'
+import { getIdentity, setIdentity } from '../identity'
 import { selectLatestPlayback } from '../playback'
 import { mergeChatMessages } from '../roomState'
 import { connectToRoom } from '../stomp'
-import {
-  isSoundCloudSetUrl,
-  isSoundCloudUrl,
-  largeArtwork,
-  parseSoundCloudUrls,
-  soundCloudUrlLabel,
-} from '../soundcloud'
+import { detectProvider, isSetUrl, isSupportedUrl, parseUrls, providerMeta, urlLabel } from '../providers'
+import { largeArtwork } from '../soundcloud'
 
 const props = defineProps({ id: { type: String, required: true } })
 const router = useRouter()
@@ -29,17 +30,23 @@ const room = ref(null)
 const error = ref('')
 const realtimeError = ref('')
 const closed = ref(false)
+const closedReason = ref('')
 const status = ref('connecting')
-const listeners = ref(0)
+const members = ref([])
 const playback = ref(null)
+const chat = ref([])
 let clockOffset = 0 // client clock minus server clock
+
+// The host named themselves when they made the room; guests pick a name and face at the door.
+const identity = ref(getIdentity())
+const joined = ref(isHost)
 
 const player = ref(null)
 const playerUrl = ref('')
+const playerProvider = ref('')
 const playerReady = ref(false)
 const playerError = ref('')
 const playerKey = ref(0)
-const tunedIn = ref(false)
 const resyncing = ref(false)
 const volume = ref(80)
 
@@ -52,10 +59,6 @@ let pendingTrackUrl = ''
 let hostStarted = false
 let queueServerTime = 0
 
-const chat = ref([])
-const chatText = ref('')
-const chatList = ref(null)
-const nickname = ref(getNickname())
 const inviteFeedback = ref('')
 const canNativeShare = typeof navigator.share === 'function'
 
@@ -68,10 +71,11 @@ let broadcastRetryTimer = null
 let inviteFeedbackTimer = null
 
 const statusLabel = computed(
-  () => ({ connected: 'Connected', connecting: 'Connecting…', disconnected: 'Reconnecting…' })[status.value],
+  () => ({ connected: 'Live', connecting: 'Connecting…', disconnected: 'Reconnecting…' })[status.value],
 )
 const artwork = computed(() => largeArtwork(playback.value?.artworkUrl))
 const activeQueueUrl = computed(() => trackQueue.value[activeQueueIndex.value] || '')
+const nowPlaying = computed(() => providerMeta(playback.value?.trackUrl || ''))
 const inviteButtonLabel = computed(
   () => inviteFeedback.value || (canNativeShare ? 'Share invite' : 'Copy invite link'),
 )
@@ -85,76 +89,93 @@ watch(
   { deep: true },
 )
 watch(activeQueueIndex, broadcastQueue)
+watch(volume, (v) => player.value?.setVolume(v))
 
 onMounted(async () => {
   try {
     const data = await api.getRoom(props.id)
-    room.value = data
-    listeners.value = data.listeners
-    playback.value = data.playback
-    chat.value = mergeChatMessages([], data.chat, MAX_CHAT)
-    if (!isHost) applyQueueState(data.queue)
+    applySnapshot(data)
     clockOffset = Date.now() - data.serverNow
-    scrollChatToBottom()
   } catch (e) {
     error.value = e.message
     return
   }
 
-  // A host who reloads the page gets their last track back in the player (not auto-playing).
+  // A host who reloads gets their last track back in the player, paused.
   if (isHost && playback.value?.trackUrl) {
-    playerUrl.value = playback.value.trackUrl
+    showInPlayer(playback.value.trackUrl)
     activeQueueIndex.value = trackQueue.value.indexOf(playback.value.trackUrl)
   }
-  // Prime a listener's widget before their direct SoundCloud Play click.
-  if (!isHost && playback.value?.trackUrl) playerUrl.value = playback.value.trackUrl
-  if (isHost && !playerUrl.value) {
-    try {
-      const queued = JSON.parse(window.sessionStorage.getItem('soundstream:queued-source'))
-      window.sessionStorage.removeItem('soundstream:queued-source')
-      if (queued?.permalinkUrl && isSoundCloudUrl(queued.permalinkUrl)) {
-        activeQueueIndex.value = addToQueue(queued.permalinkUrl)
-        pendingAutoplay = true
-        playerUrl.value = queued.permalinkUrl
-      }
-    } catch {
-      // Ignore unavailable or malformed session storage.
-    }
-  }
+  if (isHost && !playerUrl.value) restoreQueuedSource()
+  if (isHost) start()
+})
 
-  connection = connectToRoom(props.id, {
-    onStatus: (s) => {
-      status.value = s
-      if (s === 'connected') {
+onBeforeUnmount(teardown)
+
+function applySnapshot(data) {
+  room.value = data
+  members.value = data.members || []
+  playback.value = selectLatestPlayback(playback.value, data.playback)
+  chat.value = mergeChatMessages(chat.value, data.chat, MAX_CHAT)
+  if (!isHost) applyQueueState(data.queue)
+}
+
+/** A link chosen on the home page before the room existed. */
+function restoreQueuedSource() {
+  try {
+    const queued = JSON.parse(window.sessionStorage.getItem('soundstream:queued-source'))
+    window.sessionStorage.removeItem('soundstream:queued-source')
+    if (queued?.permalinkUrl && isSupportedUrl(queued.permalinkUrl)) {
+      activeQueueIndex.value = addToQueue(queued.permalinkUrl)
+      pendingAutoplay = true
+      showInPlayer(queued.permalinkUrl)
+    }
+  } catch {
+    // Ignore unavailable or malformed session storage.
+  }
+}
+
+function joinRoom(chosen) {
+  identity.value = chosen
+  setIdentity(chosen)
+  joined.value = true
+  start()
+}
+
+function start() {
+  connection = connectToRoom(
+    props.id,
+    {
+      onStatus: (s) => {
+        status.value = s
+        if (s !== 'connected') return
         realtimeError.value = ''
         if (isHost) {
           broadcastState()
           broadcastQueue()
+        } else {
+          refreshPlaybackState()
         }
-        else refreshPlaybackState()
-      }
+      },
+      onError: (message) => (realtimeError.value = message),
+      onPlayback: (state) => {
+        playback.value = state
+        syncToHost()
+      },
+      onQueue: applyQueueState,
+      onMembers: (list) => (members.value = Array.isArray(list) ? list : []),
+      onChat: (message) => (chat.value = mergeChatMessages(chat.value, [message], MAX_CHAT)),
+      onClosed: (payload) => {
+        closed.value = true
+        closedReason.value = payload?.reason === 'empty' ? 'empty' : 'host'
+        teardown()
+      },
     },
-    onError: (message) => (realtimeError.value = message),
-    onPlayback: (state) => {
-      playback.value = state
-      syncToHost()
-    },
-    onQueue: applyQueueState,
-    onListeners: (count) => (listeners.value = count),
-    onChat: (message) => {
-      chat.value = mergeChatMessages(chat.value, [message], MAX_CHAT)
-      scrollChatToBottom()
-    },
-    onClosed: () => {
-      closed.value = true
-      teardown()
-    },
-  })
+    () => ({ hostToken, name: identity.value.name, avatarId: identity.value.avatarId }),
+  )
 
   timer = isHost ? setInterval(broadcastState, HEARTBEAT_MS) : setInterval(syncToHost, SYNC_INTERVAL_MS)
-})
-
-onBeforeUnmount(teardown)
+}
 
 function teardown() {
   clearInterval(timer)
@@ -165,21 +186,41 @@ function teardown() {
   connection = null
 }
 
-watch(volume, (v) => player.value?.setVolume(v))
+// ---- Player ----
+
+/**
+ * Points the player at a URL. Each provider is a different embed, so changing provider
+ * remounts the component instead of asking one widget to load another service's link.
+ */
+function showInPlayer(url, { autoPlay = false } = {}) {
+  const provider = detectProvider(url)
+  playerProvider.value = provider
+  playerReady.value = false
+  pendingAutoplay = autoPlay
+  playerUrl.value = url
+  playerKey.value += 1
+}
 
 function onPlayerReady() {
   playerReady.value = true
   playerError.value = ''
   player.value.setVolume(volume.value)
-  if (isHost && pendingTrackUrl) {
-    const url = pendingTrackUrl
-    pendingTrackUrl = ''
-    player.value.load(url, { autoPlay: true })
+  if (isHost) {
+    if (pendingTrackUrl) {
+      const url = pendingTrackUrl
+      pendingTrackUrl = ''
+      player.value.load(url, { autoPlay: true })
+      return
+    }
+    if (pendingAutoplay) {
+      pendingAutoplay = false
+      player.value.play()
+    }
+    // Announce the loaded track even if the embed cannot start by itself: an Anghami card has no
+    // play button at all, and a Spotify embed often refuses to autoplay. Without this the room
+    // would keep showing the previous track. broadcastState() ignores a merely restored player.
+    broadcastState()
     return
-  }
-  if (isHost && pendingAutoplay) {
-    pendingAutoplay = false
-    player.value.play()
   }
   syncToHost()
 }
@@ -194,13 +235,30 @@ function retryPlayer() {
   playerKey.value += 1
 }
 
-// ---- Host ----
+function onPlayerEvent(type) {
+  if (!isHost) return
+  if (type === 'play') hostStarted = true
+  if (
+    type === 'finish' &&
+    activeQueueIndex.value >= 0 &&
+    !isSetUrl(activeQueueUrl.value) &&
+    activeQueueIndex.value < trackQueue.value.length - 1
+  ) {
+    playNext()
+    return
+  }
+  broadcastState()
+  clearTimeout(broadcastRetryTimer)
+  broadcastRetryTimer = setTimeout(broadcastState, 250)
+}
+
+// ---- Host: queue ----
 
 function readQueue() {
   if (!isHost) return []
   try {
     const saved = JSON.parse(window.localStorage.getItem(`soundstream:queue:${props.id}`))
-    return Array.isArray(saved) ? saved.filter(isSoundCloudUrl).slice(0, 100) : []
+    return Array.isArray(saved) ? saved.filter(isSupportedUrl).slice(0, 100) : []
   } catch {
     return []
   }
@@ -223,14 +281,14 @@ function addToQueue(url) {
 }
 
 function addUrls(playFirst) {
-  const urls = parseSoundCloudUrls(trackInput.value)
+  const urls = parseUrls(trackInput.value)
   if (!urls.length) {
-    formError.value = 'Paste at least one SoundCloud song, playlist, or album URL.'
+    formError.value = 'Paste at least one SoundCloud, Spotify or Anghami link.'
     return
   }
-  const invalidIndex = urls.findIndex((url) => !isSoundCloudUrl(url))
+  const invalidIndex = urls.findIndex((url) => !isSupportedUrl(url))
   if (invalidIndex >= 0) {
-    formError.value = `Line ${invalidIndex + 1} is not a valid public SoundCloud URL.`
+    formError.value = `Link ${invalidIndex + 1} is not a SoundCloud, Spotify or Anghami URL.`
     return
   }
   formError.value = ''
@@ -240,17 +298,25 @@ function addUrls(playFirst) {
   if (playFirst) playQueueItem(firstIndex)
 }
 
+function queueFromLibrary(url) {
+  const index = addToQueue(url)
+  if (activeQueueIndex.value < 0) playQueueItem(index)
+}
+
 function loadSource(sourceUrl) {
   const url = sourceUrl.trim()
-  if (!isSoundCloudUrl(url)) {
-    formError.value = 'Paste a link to a SoundCloud song, playlist, or album.'
+  if (!isSupportedUrl(url)) {
+    formError.value = 'Paste a link to a SoundCloud, Spotify or Anghami track, playlist or album.'
     return
   }
   formError.value = ''
   playerError.value = ''
-  if (!playerUrl.value) {
-    pendingAutoplay = true
-    playerUrl.value = url
+  // The host picked this deliberately, so it is theirs to broadcast — even after a reload, where
+  // hostStarted is false because no play event has happened yet in this page view.
+  hostStarted = true
+
+  if (!playerUrl.value || detectProvider(url) !== playerProvider.value) {
+    showInPlayer(url, { autoPlay: true })
   } else if (playerReady.value && player.value) {
     player.value.load(url, { autoPlay: true })
   } else {
@@ -300,28 +366,7 @@ function applyQueueState(state) {
   activeQueueIndex.value = Number.isInteger(state.activeIndex) ? state.activeIndex : -1
 }
 
-function onPlayerEvent(type) {
-  if (!isHost) {
-    if (type === 'play' && !tunedIn.value) {
-      tunedIn.value = true
-      syncToHost()
-    }
-    return
-  }
-  if (type === 'play') hostStarted = true
-  if (
-    type === 'finish' &&
-    activeQueueIndex.value >= 0 &&
-    !isSoundCloudSetUrl(activeQueueUrl.value) &&
-    activeQueueIndex.value < trackQueue.value.length - 1
-  ) {
-    playNext()
-    return
-  }
-  broadcastState()
-  clearTimeout(broadcastRetryTimer)
-  broadcastRetryTimer = setTimeout(broadcastState, 250)
-}
+// ---- Host: broadcasting ----
 
 async function broadcastState() {
   // Don't broadcast a restored-but-idle player; wait until the host actually presses play.
@@ -348,14 +393,15 @@ async function broadcastSnapshot() {
     player.value.getPosition(),
     player.value.isPaused(),
   ])
-  if (!sound || paused === null || !connection) return
+  if (!sound || !connection) return
   connection.publishPlayback({
     hostToken,
-    trackUrl: sound.permalink_url,
+    trackUrl: sound.permalink_url || playerUrl.value,
     title: sound.title,
     artist: sound.user?.username ?? '',
     artworkUrl: sound.artwork_url || sound.user?.avatar_url || '',
-    playing: !paused,
+    // Providers without a player report null; treat the host's intent as "playing".
+    playing: paused === null ? true : !paused,
     positionMs: Math.round(position ?? 0),
   })
 }
@@ -384,14 +430,8 @@ async function refreshPlaybackState(forceSync = false) {
   try {
     const data = await api.getRoom(props.id)
     if (closed.value) return
-    room.value = data
-    listeners.value = data.listeners
     clockOffset = Date.now() - data.serverNow
-    // A playback event can arrive while this request is in flight; never replace it with an older snapshot.
-    playback.value = selectLatestPlayback(playback.value, data.playback)
-    applyQueueState(data.queue)
-    chat.value = mergeChatMessages(chat.value, data.chat, MAX_CHAT)
-    scrollChatToBottom()
+    applySnapshot(data)
     await syncToHost(forceSync)
   } catch (e) {
     realtimeError.value = `Connected, but the latest playback state could not be loaded. ${e.message}`
@@ -400,9 +440,11 @@ async function refreshPlaybackState(forceSync = false) {
 
 async function syncToHost(force = false) {
   const state = playback.value
-  if (isHost || !state?.trackUrl || syncing) return
-  if (!playerUrl.value) {
-    playerUrl.value = state.trackUrl // prime the widget; onPlayerReady re-runs the sync
+  if (isHost || !joined.value || !state?.trackUrl || syncing) return
+
+  // A different service means a different embed; remount rather than cross-load.
+  if (!playerUrl.value || detectProvider(state.trackUrl) !== playerProvider.value) {
+    showInPlayer(state.trackUrl, { autoPlay: state.playing })
     return
   }
   if (!playerReady.value) return
@@ -410,10 +452,10 @@ async function syncToHost(force = false) {
   syncing = true
   try {
     if (player.value.loadedUrl() !== state.trackUrl) {
-      await player.value.load(state.trackUrl, { autoPlay: tunedIn.value && state.playing })
+      await player.value.load(state.trackUrl, { autoPlay: state.playing })
     }
-    if (!tunedIn.value) return
     const paused = await player.value.isPaused()
+    // Anghami has no player to drive; the card just shows the link.
     if (paused === null) return
     if (state.playing && paused) player.value.play()
     else if (!state.playing && !paused) player.value.pause()
@@ -447,19 +489,8 @@ async function retryConnection() {
 
 // ---- Chat & sharing ----
 
-function sendChat() {
-  const text = chatText.value.trim()
-  if (!text || !connection) return
-  const author = nickname.value.trim()
-  if (!isHost && author) setNickname(author)
-  connection.sendChat({ hostToken, author, text })
-  chatText.value = ''
-}
-
-async function scrollChatToBottom() {
-  await nextTick()
-  if (chatList.value) chatList.value.scrollTop = chatList.value.scrollHeight
-}
+const sendChat = (text) => connection?.sendChat({ hostToken, text })
+const sendSticker = (stickerId) => connection?.sendSticker({ hostToken, stickerId })
 
 function showInviteFeedback(message) {
   inviteFeedback.value = message
@@ -476,7 +507,7 @@ async function shareInvite() {
         text: `Join ${room.value?.hostName || 'the host'} on SoundStream.`,
         url,
       })
-      showInviteFeedback('Invite shared ✓')
+      showInviteFeedback('Invite shared')
       return
     } catch (e) {
       if (e?.name === 'AbortError') return
@@ -485,7 +516,7 @@ async function shareInvite() {
   }
   try {
     await navigator.clipboard.writeText(url)
-    showInviteFeedback('Link copied ✓')
+    showInviteFeedback('Link copied')
   } catch {
     window.prompt('Copy this invite link:', url)
   }
@@ -493,48 +524,66 @@ async function shareInvite() {
 </script>
 
 <template>
-  <main class="page">
-    <div v-if="error && !room" class="card ended">
+  <main class="page room-page">
+    <div v-if="error && !room" class="card ended sketch-frame">
       <h2>{{ error }}</h2>
-      <p class="muted">The stream may have ended or the code is wrong.</p>
+      <p class="muted">The stream may have ended, or the code is wrong.</p>
       <RouterLink class="btn" to="/">Back home</RouterLink>
     </div>
 
-    <div v-else-if="closed" class="card ended">
-      <h2>The stream has ended</h2>
-      <p class="muted">The host closed this room. Thanks for listening!</p>
+    <div v-else-if="closed" class="card ended sketch-frame">
+      <h2>{{ closedReason === 'empty' ? 'This room was closed' : 'The stream has ended' }}</h2>
+      <p class="muted">
+        {{
+          closedReason === 'empty'
+            ? 'Everyone had left, so the room was cleaned up.'
+            : 'The host closed the room. Thanks for listening.'
+        }}
+      </p>
       <RouterLink class="btn" to="/">Find another stream</RouterLink>
     </div>
 
     <template v-else-if="room">
-      <header class="room-header room-header--studio">
-        <div>
-          <p class="eyebrow"><span class="live-dot"></span> {{ isHost ? 'Your live studio' : `Hosted by ${room.hostName}` }}</p>
+      <header class="room-header">
+        <div class="room-title">
+          <p class="eyebrow">
+            <span class="live-dot" :class="`live-dot--${status}`"></span>
+            {{ isHost ? 'You are hosting' : 'Listening along' }}
+          </p>
           <h1>{{ room.name }}</h1>
           <div class="meta">
+            <span class="host-chip">
+              <AvatarMark :id="room.hostAvatarId" :size="26" flat />
+              {{ room.hostName }}
+            </span>
             <span class="pill" :class="`pill--${status}`">{{ statusLabel }}</span>
-            <span>{{ listeners }} in the room</span>
+            <span>{{ members.length }} in the room</span>
             <span>Code <strong class="mono">{{ room.id }}</strong></span>
           </div>
         </div>
         <div class="actions">
-          <button class="btn btn--ghost" type="button" @click="shareInvite">
-            {{ inviteButtonLabel }}
-          </button>
+          <button class="btn btn--ghost" type="button" @click="shareInvite">{{ inviteButtonLabel }}</button>
           <button v-if="isHost" class="btn btn--danger" type="button" @click="endStream">End stream</button>
           <RouterLink v-else class="btn btn--ghost" to="/">Leave</RouterLink>
         </div>
       </header>
 
       <p v-if="error" class="notice notice--error">{{ error }}</p>
-      <div v-if="realtimeError" class="notice notice--error player-error" role="alert">
+      <div v-if="realtimeError" class="notice notice--error split-notice" role="alert">
         <span>{{ realtimeError }}</span>
         <button class="btn btn--ghost btn--compact" type="button" @click="retryConnection">Reconnect now</button>
       </div>
 
-      <div class="room-grid">
+      <JoinGate
+        v-if="!joined"
+        :room-name="room.name"
+        :host-name="room.hostName"
+        @join="joinRoom"
+      />
+
+      <div v-else class="room-grid">
         <div class="stack">
-          <section class="card now-playing studio-now-playing">
+          <section class="card now-playing sketch-frame">
             <img v-if="artwork" :src="artwork" alt="" class="artwork" />
             <div v-else class="artwork artwork--empty">♪</div>
             <div class="np-text">
@@ -542,83 +591,86 @@ async function shareInvite() {
                 {{ playback?.playing ? 'Now playing' : playback?.trackUrl ? 'Paused' : 'Nothing playing yet' }}
               </p>
               <h2 class="track-title">
-                {{ playback?.title || (isHost ? 'Paste a SoundCloud link to start' : 'Waiting for the host…') }}
+                {{ playback?.title || (isHost ? 'Paste a link to start' : 'Waiting for the host…') }}
               </h2>
               <p v-if="playback?.artist" class="muted">{{ playback.artist }}</p>
+              <p v-if="nowPlaying" class="provider-note">
+                <span class="chip" :class="`marker-${nowPlaying.marker}`">{{ nowPlaying.label }}</span>
+                <span class="muted">{{ nowPlaying.syncNote }}</span>
+              </p>
             </div>
-            <span v-if="playback?.playing" class="live-badge">LIVE</span>
           </section>
 
-          <form v-if="isHost" class="card queue-form" @submit.prevent="addUrls(true)">
-            <label for="track-url">SoundCloud songs, playlists, or albums</label>
+          <form v-if="isHost" class="card sketch-frame-2" @submit.prevent="addUrls(true)">
+            <label for="track-url">SoundCloud, Spotify or Anghami links</label>
             <textarea
-                id="track-url"
-                v-model="trackInput"
-                rows="3"
-                placeholder="Paste one SoundCloud URL per line"
-                autocomplete="off"
-              ></textarea>
-            <div class="queue-form-actions">
+              id="track-url"
+              v-model="trackInput"
+              rows="3"
+              placeholder="Paste one link per line"
+              autocomplete="off"
+            ></textarea>
+            <div class="button-row">
               <button class="btn" type="submit">Play first + queue all</button>
               <button class="btn btn--ghost" type="button" @click="addUrls(false)">Add to queue</button>
             </div>
             <p v-if="formError" class="field-error">{{ formError }}</p>
-            <p class="hint">Paste several links at once. Playlists and albums continue through their own SoundCloud track list.</p>
+            <p class="hint">
+              SoundCloud plays full tracks in sync. Spotify embeds are limited to a ~30s preview, and
+              Anghami links open in Anghami.
+            </p>
           </form>
 
-          <section v-if="isHost && trackQueue.length" class="card host-queue">
-            <div class="queue-heading">
-              <div><p class="eyebrow">Up next</p><h3>Room queue <span>{{ trackQueue.length }}</span></h3></div>
-              <div class="queue-controls">
-                <button class="btn btn--ghost btn--compact" type="button" :disabled="activeQueueIndex <= 0" @click="playPrevious">Previous</button>
-                <button class="btn btn--ghost btn--compact" type="button" :disabled="activeQueueIndex < 0 || activeQueueIndex >= trackQueue.length - 1" @click="playNext">Next</button>
-                <button class="queue-clear" type="button" @click="clearQueue">Clear</button>
-              </div>
-            </div>
-            <ol class="queue-list">
-              <li v-for="(url, index) in trackQueue" :key="url" :class="{ active: index === activeQueueIndex }">
-                <button class="queue-play" type="button" @click="playQueueItem(index)">
-                  <span>{{ index === activeQueueIndex ? '▶' : index + 1 }}</span>
-                  <span><strong>{{ soundCloudUrlLabel(url) }}</strong><small>{{ isSoundCloudSetUrl(url) ? 'Playlist or album' : 'Song or share link' }}</small></span>
-                </button>
-                <button class="queue-remove" type="button" :aria-label="`Remove ${soundCloudUrlLabel(url)} from queue`" @click="removeQueueItem(index)">×</button>
-              </li>
-            </ol>
-          </section>
-
-          <section v-else-if="trackQueue.length" class="card host-queue listener-queue">
+          <section v-if="trackQueue.length" class="card sketch-frame">
             <div class="queue-heading">
               <div>
-                <p class="eyebrow">Coming up</p>
+                <p class="eyebrow">{{ isHost ? 'Up next' : 'Coming up' }}</p>
                 <h3>Room queue <span>{{ trackQueue.length }}</span></h3>
+              </div>
+              <div v-if="isHost" class="queue-controls">
+                <button class="btn btn--ghost btn--compact" type="button" :disabled="activeQueueIndex <= 0" @click="playPrevious">Previous</button>
+                <button class="btn btn--ghost btn--compact" type="button" :disabled="activeQueueIndex < 0 || activeQueueIndex >= trackQueue.length - 1" @click="playNext">Next</button>
+                <button class="quiet-button" type="button" @click="clearQueue">Clear</button>
               </div>
             </div>
             <ol class="queue-list">
               <li v-for="(url, index) in trackQueue" :key="url" :class="{ active: index === activeQueueIndex }">
-                <div class="queue-play queue-play--readonly">
-                  <span>{{ index === activeQueueIndex ? '▶' : index + 1 }}</span>
-                  <span>
-                    <strong>{{ soundCloudUrlLabel(url) }}</strong>
+                <component
+                  :is="isHost ? 'button' : 'div'"
+                  class="queue-play"
+                  :type="isHost ? 'button' : undefined"
+                  @click="isHost && playQueueItem(index)"
+                >
+                  <span class="queue-index">{{ index === activeQueueIndex ? '▶' : index + 1 }}</span>
+                  <span class="queue-text">
+                    <strong>{{ urlLabel(url) }}</strong>
                     <small>
-                      {{ index === activeQueueIndex ? 'Playing now' : isSoundCloudSetUrl(url) ? 'Playlist or album' : 'Up next' }}
+                      <span class="chip chip--small" :class="`marker-${providerMeta(url)?.marker}`">
+                        {{ providerMeta(url)?.label }}
+                      </span>
+                      {{ isSetUrl(url) ? 'Playlist or album' : 'Single track' }}
                     </small>
                   </span>
-                </div>
+                </component>
+                <button
+                  v-if="isHost"
+                  class="queue-remove"
+                  type="button"
+                  :aria-label="`Remove ${urlLabel(url)} from queue`"
+                  @click="removeQueueItem(index)"
+                >
+                  ×
+                </button>
               </li>
             </ol>
           </section>
 
-          <section v-if="!isHost && !tunedIn && !playerReady" class="card tune-in">
-            <p v-if="!playback?.trackUrl" class="muted">Waiting for the host to choose the first track.</p>
-            <p v-else class="muted">Preparing the SoundCloud player…</p>
-          </section>
-
-          <section v-if="playerUrl" class="card player-card">
-            <SoundCloudPlayer
-              :key="playerKey"
+          <section v-if="playerUrl" class="card sketch-frame-2 player-card">
+            <RoomPlayer
+              :key="`${playerProvider}-${playerKey}`"
               ref="player"
               :initial-url="playerUrl"
-              :auto-play="isHost && pendingAutoplay"
+              :auto-play="pendingAutoplay"
               @ready="onPlayerReady"
               @play="onPlayerEvent('play')"
               @pause="onPlayerEvent('pause')"
@@ -631,46 +683,30 @@ async function shareInvite() {
                 <label for="volume">Volume</label>
                 <input id="volume" v-model.number="volume" type="range" min="0" max="100" />
               </div>
-              <button
-                v-if="!isHost && tunedIn"
-                class="btn btn--ghost btn--compact"
-                type="button"
-                :disabled="resyncing"
-                @click="resyncNow"
-              >
+              <button v-if="!isHost" class="btn btn--ghost btn--compact" type="button" :disabled="resyncing" @click="resyncNow">
                 {{ resyncing ? 'Syncing…' : 'Sync now' }}
               </button>
             </div>
-            <p v-if="!isHost && !tunedIn" class="hint">
-              Press the orange Play button in SoundCloud once to tune in. Your browser requires this direct click for audio.
-            </p>
-            <p v-else-if="!isHost" class="hint">The host controls playback. You'll stay in sync automatically.</p>
+            <p v-if="!isHost" class="hint">The host controls playback. You stay in sync automatically.</p>
           </section>
 
-          <p v-else-if="!isHost && tunedIn" class="muted">Tuned in. Music will start when the host plays something.</p>
-          <div v-if="playerError" class="notice notice--error player-error">
+          <p v-else-if="!isHost" class="muted">Tuned in. Music starts when the host plays something.</p>
+
+          <div v-if="playerError" class="notice notice--error split-notice">
             <span>{{ playerError }}</span>
             <button class="btn btn--ghost btn--compact" type="button" @click="retryPlayer">Retry player</button>
           </div>
         </div>
 
-        <aside class="card chat">
-          <h3>Chat</h3>
-          <ul ref="chatList" class="chat-list">
-            <li v-if="!chat.length" class="muted">No messages yet. Say hi 👋</li>
-            <li v-for="(message, i) in chat" :key="message.id || i">
-              <strong :class="{ 'is-host': message.host }">{{ message.author }}</strong>
-              <span v-if="message.host" class="badge">host</span>
-              {{ message.text }}
-            </li>
-          </ul>
-          <form class="chat-form" @submit.prevent="sendChat">
-            <input v-if="!isHost" v-model="nickname" placeholder="Your name" maxlength="40" />
-            <div class="row">
-              <input v-model="chatText" placeholder="Message" maxlength="500" />
-              <button class="btn" type="submit" :disabled="status !== 'connected'">Send</button>
-            </div>
-          </form>
+        <aside class="stack side-column">
+          <MemberList :members="members" />
+          <ChatPanel
+            :messages="chat"
+            :connected="status === 'connected'"
+            @send="sendChat"
+            @sticker="sendSticker"
+          />
+          <SpotifyLibrary v-if="isHost" @queue="queueFromLibrary" />
         </aside>
       </div>
     </template>

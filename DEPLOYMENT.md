@@ -40,6 +40,10 @@ Deploy the backend first so it accepts the canonical origin, then redeploy the f
 ## 3. Production smoke test
 
 1. Open the Vercel site and confirm Live rooms loads without a 404.
-2. Create a room with a public SoundCloud song, playlist, or album URL.
-3. Open its invite link in a second browser.
-4. Tune in once, then verify play, pause, seek, track changes, listener count, chat, and End stream.
+2. Create a room, picking a name and an avatar, with a public SoundCloud song, playlist, or album URL.
+3. Open its invite link in a second browser and join with a different name and avatar.
+4. Verify play, pause, seek, track changes, the member list, chat, stickers, and End stream.
+5. Queue a Spotify and an Anghami link and confirm each is labelled (preview-only, link-only).
+
+If you set `VITE_SPOTIFY_CLIENT_ID`, add `https://<your-vercel-domain>/spotify/callback` to the
+Spotify app's redirect URIs, or host-only library browsing will fail at the redirect.
