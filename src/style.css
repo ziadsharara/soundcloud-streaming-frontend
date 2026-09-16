@@ -1447,3 +1447,35 @@ div.queue-play {
   text-align: center;
   color: var(--marker-coral);
 }
+
+/* ---- Install app ---- */
+
+.install-wrap {
+  position: relative;
+}
+
+.install-button svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.install-hint {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 50;
+  width: max-content;
+  max-width: 240px;
+  margin: 0;
+  padding: 9px 13px;
+  border: 1.8px solid var(--line);
+  border-radius: 13px 10px 14px 11px;
+  background: var(--paper-raised);
+  box-shadow: 4px 4px 0 var(--shadow-ink);
+  font-size: 0.88rem;
+}

@@ -1,6 +1,7 @@
 <script setup>
 import { useRoute } from 'vue-router'
 import { useTheme } from './theme'
+import InstallButton from './components/InstallButton.vue'
 
 const route = useRoute()
 const { theme, toggleTheme } = useTheme()
@@ -21,6 +22,7 @@ const { theme, toggleTheme } = useTheme()
       </nav>
 
       <div class="topbar-actions">
+        <InstallButton />
         <button
           class="icon-button"
           type="button"

@@ -14,6 +14,7 @@ borders, hard offset shadows, drawn marks).
 - Instant playback-state recovery after reconnects, plus a manual sync control.
 - Native invite sharing on supported phones, clipboard fallback everywhere else.
 - Persistent light and dark modes; light is the default.
+- Installable as an app on phones and desktops (PWA), with an offline-ready shell.
 
 ## Run locally
 
@@ -36,6 +37,17 @@ BACKEND_PORT=8081 npm run dev
 | `VITE_WS_URL` | Optional; derived from the API origin when omitted |
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) for the Vercel + AWS setup.
+
+## Installing as an app
+
+The build ships a web app manifest and a service worker, so Chrome, Edge and Android offer
+**Install app** (the button in the header appears once the browser says it qualifies). iOS Safari
+has no install prompt, so the same button shows the Share → Add to Home Screen instruction instead.
+
+The service worker only runs in a real build — use `npm run preview`, not `npm run dev`, to exercise
+it. The API and the WebSocket are never cached: rooms are live, and a cached room is a wrong room.
+
+Icons live in `public/` and are generated from `public/icon.svg`.
 
 ## Verify
 
