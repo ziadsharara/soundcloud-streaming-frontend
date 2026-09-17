@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { latestServerTime, receiptState } from './receipts'
+import { latestServerTime, receiptState, receiptStateFrom, receiptThresholds } from './receipts'
 
 const me = 'member-me'
 const message = { id: 'm1', memberId: me, serverTime: 1_000 }
@@ -61,5 +61,41 @@ describe('read receipts', () => {
   it('finds the newest message to acknowledge', () => {
     expect(latestServerTime([{ serverTime: 5 }, { serverTime: 40 }, { serverTime: 12 }])).toBe(40)
     expect(latestServerTime([])).toBe(0)
+  })
+})
+
+describe('receiptThresholds', () => {
+  const members = [{ id: 'me' }, { id: 'a' }, { id: 'b' }]
+
+  it('draws the same ticks as walking every member, at a fraction of the work', () => {
+    const receipts = { a: { deliveredAt: 100, readAt: 100 }, b: { deliveredAt: 100, readAt: 50 } }
+    const thresholds = receiptThresholds({ receipts, members, myId: 'me' })
+
+    for (const serverTime of [40, 60, 100, 120]) {
+      const message = { memberId: 'me', serverTime }
+      expect(receiptStateFrom(message, thresholds, 'me')).toBe(
+        receiptState(message, { receipts, members, myId: 'me' }),
+      )
+    }
+  })
+
+  it('is decided by whoever is furthest behind', () => {
+    const receipts = { a: { deliveredAt: 100, readAt: 100 }, b: { deliveredAt: 100, readAt: 0 } }
+    const thresholds = receiptThresholds({ receipts, members, myId: 'me' })
+
+    expect(receiptStateFrom({ memberId: 'me', serverTime: 90 }, thresholds, 'me')).toBe('delivered')
+  })
+
+  it('says sent when you are the only one here', () => {
+    const thresholds = receiptThresholds({ receipts: {}, members: [{ id: 'me' }], myId: 'me' })
+
+    expect(thresholds.alone).toBe(true)
+    expect(receiptStateFrom({ memberId: 'me', serverTime: 1 }, thresholds, 'me')).toBe('sent')
+  })
+
+  it('puts no ticks on someone else’s message', () => {
+    const thresholds = receiptThresholds({ receipts: {}, members, myId: 'me' })
+
+    expect(receiptStateFrom({ memberId: 'a', serverTime: 1 }, thresholds, 'me')).toBeNull()
   })
 })

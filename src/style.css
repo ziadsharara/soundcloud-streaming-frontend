@@ -1994,6 +1994,27 @@ div.queue-play {
   }
 }
 
+/* A message on its way: present, legible, and clearly not landed yet. */
+.chat-message--pending .chat-said,
+.chat-message--pending .chat-meta {
+  opacity: 0.72;
+}
+
+.ticks--pending {
+  color: var(--ink-muted);
+  opacity: 0.7;
+}
+
+.ticks--pending svg {
+  width: 13px;
+  height: 13px;
+}
+
+.chat-failed {
+  margin: 3px 0 0;
+  font-size: 0.78rem;
+}
+
 /* ---- Voice notes, video notes and files ---------------------------------- */
 
 .visually-hidden {

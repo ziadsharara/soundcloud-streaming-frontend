@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { mergeChatMessages } from './roomState'
+import { failMessage, mergeChatMessages, newClientId, pendingMessage } from './roomState'
 
 describe('room state helpers', () => {
   it('merges history with live messages in chronological order', () => {
@@ -25,5 +25,60 @@ describe('room state helpers', () => {
     }))
 
     expect(mergeChatMessages([], messages, 3).map((message) => message.id)).toEqual(['2', '3', '4'])
+  })
+})
+
+describe('messages drawn before the room confirms them', () => {
+  const pending = pendingMessage({ clientId: 'c1', memberId: 'me', author: 'Me', avatarId: 'bun', text: 'hi' })
+
+  it('shows what you sent straight away', () => {
+    expect(pending.pending).toBe(true)
+    expect(pending.text).toBe('hi')
+  })
+
+  it('is replaced by the room’s own copy rather than doubled', () => {
+    const confirmed = {
+      id: 'server-1',
+      clientId: 'c1',
+      memberId: 'me',
+      author: 'Me',
+      avatarId: 'bun',
+      kind: 'TEXT',
+      text: 'hi',
+      serverTime: pending.serverTime + 40,
+    }
+
+    const merged = mergeChatMessages([pending], [confirmed])
+
+    expect(merged).toHaveLength(1)
+    expect(merged[0].id).toBe('server-1')
+    expect(merged[0].pending).toBeUndefined()
+  })
+
+  it('never lets a late pending copy overwrite the confirmed one', () => {
+    const confirmed = { id: 'server-1', clientId: 'c1', memberId: 'me', author: 'Me', text: 'hi', serverTime: 10 }
+
+    const merged = mergeChatMessages([confirmed], [{ ...pending, serverTime: 5 }])
+
+    expect(merged).toHaveLength(1)
+    expect(merged[0].id).toBe('server-1')
+  })
+
+  it('keeps two people’s messages apart even if their ids collided', () => {
+    const mine = pendingMessage({ clientId: 'same', memberId: 'me', author: 'Me', text: 'mine' })
+    const theirs = { id: 's2', clientId: 'same', memberId: 'you', author: 'You', text: 'theirs', serverTime: 2 }
+
+    expect(mergeChatMessages([mine], [theirs])).toHaveLength(2)
+  })
+
+  it('marks one that never made it', () => {
+    const failed = failMessage([pending], 'c1')
+
+    expect(failed[0].failed).toBe(true)
+    expect(failed[0].pending).toBe(false)
+  })
+
+  it('gives every message its own id', () => {
+    expect(newClientId()).not.toBe(newClientId())
   })
 })

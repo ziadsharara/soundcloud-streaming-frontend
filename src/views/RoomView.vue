@@ -14,9 +14,9 @@ import { looksLikeSeek, selectLatestPlayback } from '../playback'
 import { notifyChatMessage } from '../notifications'
 import { latestServerTime } from '../receipts'
 import { applyReactionUpdate } from '../reactions'
-import { releaseAttachments } from '../attachments'
+import { attachmentKind, releaseAttachments, seedAttachment, uploadAttachment } from '../attachments'
 import { applyTyping, pruneTyping, typingLabel, typingNames } from '../typing'
-import { mergeChatMessages } from '../roomState'
+import { failMessage, mergeChatMessages, newClientId, pendingMessage } from '../roomState'
 import { connectToRoom } from '../stomp'
 import ProviderLogo from '../components/ProviderLogo.vue'
 import { detectProvider, isSetUrl, isSupportedUrl, parseUrls, providerBadge, urlLabel } from '../providers'
@@ -29,6 +29,7 @@ const DRIFT_MS = 2500 // listeners re-seek when further than this from the host
 const SYNC_INTERVAL_MS = 3000 // how often listeners check their drift
 const HEARTBEAT_MS = 5000 // how often the host re-broadcasts its position
 const AUTOPLAY_CHECK_MS = 900 // how long to give the player before calling autoplay blocked
+const RECEIPT_DEBOUNCE_MS = 350 // one acknowledgement for a burst of messages, not one each
 const MAX_CHAT = 100
 
 const hostToken = getHostToken(props.id)
@@ -99,6 +100,7 @@ let inviteFeedbackTimer = null
 let queueNoteTimer = null
 let typingTimer = null
 let autoplayCheckTimer = null
+let receiptTimer = null
 
 const isChatRoom = computed(() => room.value?.kind === 'CHAT')
 const statusLabel = computed(
@@ -270,6 +272,7 @@ function teardown() {
   clearTimeout(inviteFeedbackTimer)
   clearTimeout(queueNoteTimer)
   clearTimeout(autoplayCheckTimer)
+  clearTimeout(receiptTimer)
   broadcastQueued = false
   connection?.disconnect()
   connection = null
@@ -635,9 +638,68 @@ async function retryConnection() {
 
 // ---- Chat & sharing ----
 
-const sendChat = (text) => connection?.sendChat({ hostToken, text })
-const sendSticker = (stickerId) => connection?.sendSticker({ hostToken, stickerId })
-const sendAttachment = ({ attachmentId, text }) => connection?.sendAttachment({ hostToken, attachmentId, text })
+/**
+ * Sending, without the wait.
+ *
+ * The room's server can be most of a second away, and publishing and then waiting for the message
+ * to come back before drawing it is what makes a chat feel slow. Each message is drawn the moment
+ * it is sent, carrying an id of this browser's own; the server echoes that id back, and the copy
+ * that returns takes the place of the one already on screen.
+ */
+function ownMessage(extra) {
+  return pendingMessage({
+    clientId: newClientId(),
+    memberId: myId,
+    author: (isHost ? room.value?.hostName : identity.value.name) || identity.value.name || 'You',
+    avatarId: (isHost ? room.value?.hostAvatarId : identity.value.avatarId) || identity.value.avatarId,
+    host: isHost,
+    ...extra,
+  })
+}
+
+function show(message) {
+  chat.value = mergeChatMessages(chat.value, [message], MAX_CHAT)
+  return message.clientId
+}
+
+function sendChat(text) {
+  const clientId = show(ownMessage({ text }))
+  connection?.sendChat({ hostToken, text, clientId })
+}
+
+function sendSticker(stickerId) {
+  const clientId = show(ownMessage({ kind: 'STICKER', stickerId }))
+  connection?.sendSticker({ hostToken, stickerId, clientId })
+}
+
+/**
+ * A voice note, video note or file: on screen and playable from this browser's own copy while it
+ * is still going up, and never downloaded back again once it lands.
+ */
+async function sendAttachment({ file, kind, durationMs = 0, text = '' }) {
+  const message = ownMessage({
+    kind: 'ATTACHMENT',
+    text,
+    attachment: {
+      id: '',
+      name: file.name,
+      contentType: file.type,
+      size: file.size,
+      kind: attachmentKind(file, { recorded: kind }),
+      durationMs,
+      localUrl: URL.createObjectURL(file),
+    },
+  })
+  show(message)
+  try {
+    const attachment = await uploadAttachment(props.id, file, { kind, memberId: myId, durationMs })
+    seedAttachment(props.id, attachment.id, file)
+    connection?.sendAttachment({ hostToken, attachmentId: attachment.id, text, clientId: message.clientId })
+  } catch (e) {
+    chat.value = failMessage(chat.value, message.clientId)
+    realtimeError.value = e.message
+  }
+}
 const reactToMessage = (messageId, emoji) => connection?.sendReaction(messageId, emoji)
 
 /**
@@ -645,10 +707,17 @@ const reactToMessage = (messageId, emoji) => connection?.sendReaction(messageId,
  * reading every message before it, so one timestamp is enough to draw ticks for the whole history.
  * A hidden tab has received but not read them.
  */
+/**
+ * Acknowledged in one go rather than per message: every receipt is broadcast to the whole room,
+ * so a burst of arrivals would otherwise cost everyone a round of traffic each.
+ */
 function acknowledgeChat() {
-  const through = latestServerTime(chat.value)
-  if (!through || !connection) return
-  connection.sendReceipt({ read: !document.hidden, throughServerTime: through })
+  clearTimeout(receiptTimer)
+  receiptTimer = setTimeout(() => {
+    const through = latestServerTime(chat.value)
+    if (!through || !connection) return
+    connection.sendReceipt({ read: !document.hidden, throughServerTime: through })
+  }, RECEIPT_DEBOUNCE_MS)
 }
 
 function onVisibilityChange() {

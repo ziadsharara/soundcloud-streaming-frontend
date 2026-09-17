@@ -17,6 +17,11 @@ const source = ref('')
 const failed = ref(false)
 
 onMounted(async () => {
+  // Something this browser just sent is already here; there is nothing to fetch.
+  if (props.attachment.localUrl) {
+    source.value = props.attachment.localUrl
+    return
+  }
   source.value = await attachmentUrl(props.roomId, props.attachment)
   failed.value = !source.value
 })

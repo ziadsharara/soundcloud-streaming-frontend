@@ -86,6 +86,19 @@ export async function uploadAttachment(roomId, file, { kind, memberId, durationM
  */
 const cache = new Map()
 
+/**
+ * Remembers a file this browser already has, under the id the room gave it.
+ *
+ * Without this the sender downloads back the very voice note they just uploaded, over the same
+ * slow link, before they can hear it.
+ */
+export function seedAttachment(roomId, attachmentId, file) {
+  if (!attachmentId || !file) return ''
+  const url = URL.createObjectURL(file)
+  cache.set(`${roomId}:${attachmentId}`, Promise.resolve(url))
+  return url
+}
+
 export function attachmentUrl(roomId, attachment) {
   if (!attachment?.id) return Promise.resolve('')
   const cacheKey = `${roomId}:${attachment.id}`

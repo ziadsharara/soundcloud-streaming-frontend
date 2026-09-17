@@ -30,8 +30,16 @@ export async function startRecording({ video = false } = {}) {
   const stream = await navigator.mediaDevices.getUserMedia(
     video ? { audio: true, video: { facingMode: 'user', width: 480, height: 480 } } : { audio: true },
   )
-  const mimeType = pickMimeType(video)
-  const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
+  /*
+   * Deliberately modest bitrates. A note is speech, not a master: at the browser's defaults a
+   * half-minute video note is several megabytes to push up a slow link before anyone can hear it.
+   */
+  const recorder = new MediaRecorder(stream, {
+    ...(pickMimeType(video) ? { mimeType: pickMimeType(video) } : {}),
+    audioBitsPerSecond: 48_000,
+    ...(video ? { videoBitsPerSecond: 700_000 } : {}),
+  })
+  const mimeType = recorder.mimeType
   const chunks = []
   recorder.ondataavailable = (event) => {
     if (event.data?.size) chunks.push(event.data)

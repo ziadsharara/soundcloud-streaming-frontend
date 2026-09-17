@@ -1,14 +1,13 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import AvatarMark from './AvatarMark.vue'
-import ChatAttachment from './ChatAttachment.vue'
+import ChatMessages from './ChatMessages.vue'
 import StickerMark from './StickerMark.vue'
 import { EMOJI_GROUPS } from '../emoji'
 import { STICKERS } from '../stickers'
-import { RECEIPT_LABELS, receiptState } from '../receipts'
-import { REACTION_PALETTE, summariseReactions } from '../reactions'
+import { RECEIPT_LABELS, receiptStateFrom, receiptThresholds } from '../receipts'
+import { summariseReactions } from '../reactions'
 import { continuesBlock, dayLabel, messageTime, startsNewDay } from '../chatTime'
-import { attachmentKind, uploadAttachment } from '../attachments'
+import { attachmentKind } from '../attachments'
 import { recordingSupported, startRecording } from '../recorder'
 import {
   disableNotifications,
@@ -32,6 +31,7 @@ const props = defineProps({
   typingLabel: { type: String, default: '' },
 })
 const emit = defineEmits(['send', 'sticker', 'typing', 'react', 'attachment'])
+/** Uploading belongs to the room, which can draw the message while it is still going up. */
 
 /*
  * Typing is announced at most every couple of seconds, and withdrawn once the keys stop, so a
@@ -62,12 +62,9 @@ const text = ref('')
 const list = ref(null)
 const tray = ref('') // '', 'emoji' or 'stickers'
 const notifyError = ref('')
-/** Which message has its reaction palette open; only ever one. */
-const reactingTo = ref('')
 
 // ---- Voice notes, video notes and files ----
 const fileInput = ref(null)
-const sending = ref('')
 const attachError = ref('')
 const canRecord = recordingSupported()
 /** The recording in progress, if any: 'VOICE' or 'VIDEO_NOTE'. */
@@ -127,31 +124,28 @@ async function finishRecording() {
   try {
     const { file, durationMs } = await current.stop()
     // A tap that never became a recording is nothing to send.
-    if (file.size > 0 && durationMs > 400) await sendFile(file, kind, durationMs)
+    if (file.size > 0 && durationMs > 400) sendFile(file, kind, durationMs)
   } catch {
     attachError.value = 'That recording could not be saved.'
   }
 }
 
-async function onFilesChosen(event) {
+function onFilesChosen(event) {
   const files = [...(event.target.files || [])]
   event.target.value = ''
-  for (const file of files) await sendFile(file, attachmentKind(file))
+  files.forEach((file) => sendFile(file, attachmentKind(file)))
 }
 
-async function sendFile(file, kind, durationMs = 0) {
+/**
+ * Hands the file to the room, which shows it immediately and uploads it behind the scenes.
+ * Waiting here for the upload before drawing anything is what made sending a voice note feel
+ * like nothing had happened.
+ */
+function sendFile(file, kind, durationMs = 0) {
   attachError.value = ''
-  sending.value = file.name || 'file'
-  try {
-    const attachment = await uploadAttachment(props.roomId, file, { kind, memberId: props.myId, durationMs })
-    emit('attachment', { attachmentId: attachment.id, text: text.value.trim() })
-    text.value = ''
-    tray.value = ''
-  } catch (e) {
-    attachError.value = e.message
-  } finally {
-    sending.value = ''
-  }
+  emit('attachment', { file, kind, durationMs, text: text.value.trim() })
+  text.value = ''
+  tray.value = ''
 }
 
 const recordingLabel = computed(() => {
@@ -160,29 +154,75 @@ const recordingLabel = computed(() => {
 })
 
 /**
- * The chat as it is drawn: a date divider where the day turns over, and one block per run of
- * messages from the same person, so a fast exchange doesn't repeat a face on every line.
+ * The chat as it is drawn: a date divider where the day turns over, one block per run of messages
+ * from the same person, and the ticks and reactions each message needs.
+ *
+ * All of it is worked out here, once, rather than in the template — which asked for the same ticks
+ * five times per message, every time anything on the page changed, typing included.
  */
-const rendered = computed(() =>
-  props.messages.map((message, index) => {
+const rows = computed(() => {
+  const thresholds = receiptThresholds({
+    receipts: props.receipts,
+    members: props.members,
+    myId: props.myId,
+  })
+  return props.messages.map((message, index) => {
     const previous = props.messages[index - 1]
     const newDay = startsNewDay(message, previous)
+    const ticks = receiptStateFrom(message, thresholds, props.myId)
     return {
+      key: message.clientId ? `${message.memberId}:${message.clientId}` : message.id,
       message,
       divider: newDay ? dayLabel(message.serverTime) : '',
       grouped: continuesBlock(message, previous) && !newDay,
       time: messageTime(message.serverTime),
       iso: message.serverTime ? new Date(message.serverTime).toISOString() : '',
+      ticks,
+      tickLabel: ticks ? RECEIPT_LABELS[ticks] : '',
+      reactions: summariseReactions(props.reactions, message.id, props.myId),
     }
-  }),
-)
+  })
+})
 
-watch(() => props.messages.length, scrollToBottom)
+// Watching the rows, not just how many there are: a message confirmed, a reaction added or a
+// voice note settling all change the height of the list without changing its length.
+watch(rows, keepUpWithTheChat)
 
-async function scrollToBottom() {
-  await nextTick()
+/** Within this much of the end counts as "reading the newest", not reading back through history. */
+const NEAR_BOTTOM_PX = 80
+
+const atBottom = () =>
+  !list.value || list.value.scrollHeight - list.value.scrollTop - list.value.clientHeight < NEAR_BOTTOM_PX
+
+const pin = () => {
   if (list.value) list.value.scrollTop = list.value.scrollHeight
 }
+
+/** Whether the view has been put on the newest message yet; a fresh list opens at the top. */
+let following = false
+
+/**
+ * Follows the conversation, without dragging you away from what you were reading.
+ *
+ * Opening a room lands on the newest message; after that it only keeps up while you are already
+ * at the end, so a message arriving mid-scroll does not yank you out of the history.
+ *
+ * Pinned twice: once as the message is added, and again on the next frame, because a voice note
+ * or a row of ticks settles into its height a moment after it first appears — which used to leave
+ * the newest message just off the bottom edge.
+ */
+async function keepUpWithTheChat() {
+  const follow = !following || atBottom()
+  await nextTick()
+  if (!follow) return
+  following = true
+  pin()
+  requestAnimationFrame(pin)
+}
+
+onMounted(keepUpWithTheChat)
+
+
 
 function send() {
   const body = text.value.trim()
@@ -204,36 +244,15 @@ function sendSticker(id) {
 
 const toggleTray = (name) => (tray.value = tray.value === name ? '' : name)
 
-const ticksFor = (message) =>
-  receiptState(message, { receipts: props.receipts, members: props.members, myId: props.myId })
+/*
+ * A named handler, not an inline arrow: a fresh function on every render is a changed prop, and
+ * the message list would redraw itself on every letter typed into the box below it.
+ */
+const onReact = (messageId, emoji) => emit('react', messageId, emoji)
 
-const reactionsFor = (message) => summariseReactions(props.reactions, message.id, props.myId)
-
-const toggleReactionPalette = (messageId) =>
-  (reactingTo.value = reactingTo.value === messageId ? '' : messageId)
-
-function react(messageId, emoji) {
-  emit('react', messageId, emoji)
-  reactingTo.value = ''
-}
-
-/** A palette left open is closed by the next click anywhere else, or by Escape. */
-function onDocumentPointerDown(event) {
-  if (reactingTo.value && !event.target.closest?.('.react-anchor')) reactingTo.value = ''
-}
-const onDocumentKeydown = (event) => {
-  if (event.key === 'Escape') reactingTo.value = ''
-}
-
-onMounted(() => {
-  document.addEventListener('pointerdown', onDocumentPointerDown)
-  document.addEventListener('keydown', onDocumentKeydown)
-})
 onBeforeUnmount(() => {
   stopTyping()
   cancelRecording()
-  document.removeEventListener('pointerdown', onDocumentPointerDown)
-  document.removeEventListener('keydown', onDocumentKeydown)
 })
 
 const notifyLabel = computed(() =>
@@ -277,92 +296,7 @@ async function toggleNotifications() {
 
     <ul ref="list" class="chat-list">
       <li v-if="!messages.length" class="muted chat-empty">No messages yet. Say hi.</li>
-      <template v-for="row in rendered" :key="row.message.id">
-        <li v-if="row.divider" class="chat-day" role="separator">
-          <span class="hand">{{ row.divider }}</span>
-        </li>
-        <li class="chat-message" :class="{ 'chat-message--grouped': row.grouped }">
-          <AvatarMark v-if="!row.grouped" :id="row.message.avatarId" :size="30" flat />
-          <span v-else class="chat-gutter" aria-hidden="true"></span>
-
-          <div class="chat-body">
-            <p v-if="!row.grouped" class="chat-meta">
-              <strong :class="{ 'is-host': row.message.host }">{{ row.message.author }}</strong>
-              <span v-if="row.message.host" class="badge">host</span>
-            </p>
-            <div class="chat-said">
-              <StickerMark v-if="row.message.kind === 'STICKER'" :id="row.message.stickerId" :size="64" />
-              <div v-else-if="row.message.kind === 'ATTACHMENT' && row.message.attachment" class="chat-sent-file">
-                <ChatAttachment :room-id="roomId" :attachment="row.message.attachment" />
-                <p v-if="row.message.text" class="chat-text">{{ row.message.text }}</p>
-              </div>
-              <p v-else class="chat-text">{{ row.message.text }}</p>
-              <time class="chat-stamp" :datetime="row.iso">{{ row.time }}</time>
-            </div>
-
-            <ul v-if="reactionsFor(row.message).length" class="reactions">
-              <li v-for="reaction in reactionsFor(row.message)" :key="reaction.emoji">
-                <button
-                  class="reaction"
-                  type="button"
-                  :class="{ mine: reaction.mine }"
-                  :aria-pressed="reaction.mine"
-                  :aria-label="`${reaction.emoji} ${reaction.count}`"
-                  @click="react(row.message.id, reaction.emoji)"
-                >
-                  <span aria-hidden="true">{{ reaction.emoji }}</span>
-                  <small>{{ reaction.count }}</small>
-                </button>
-              </li>
-            </ul>
-          </div>
-
-          <span class="chat-aside">
-            <span class="react-anchor">
-              <button
-                class="react-button"
-                type="button"
-                :class="{ active: reactingTo === row.message.id }"
-                :aria-expanded="reactingTo === row.message.id"
-                aria-label="React to this message"
-                @click="toggleReactionPalette(row.message.id)"
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <circle cx="12" cy="12" r="9" />
-                  <path d="M9 10v.2M15 10v.2" />
-                  <path d="M8.5 14.5a4.5 3 0 0 0 7 0" />
-                </svg>
-              </button>
-              <div v-if="reactingTo === row.message.id" class="reaction-palette" role="menu">
-                <button
-                  v-for="emoji in REACTION_PALETTE"
-                  :key="emoji"
-                  class="emoji-button"
-                  type="button"
-                  role="menuitem"
-                  :aria-label="`React with ${emoji}`"
-                  @click="react(row.message.id, emoji)"
-                >
-                  {{ emoji }}
-                </button>
-              </div>
-            </span>
-
-            <span
-              v-if="ticksFor(row.message)"
-              class="ticks"
-              :class="`ticks--${ticksFor(row.message)}`"
-              :title="RECEIPT_LABELS[ticksFor(row.message)]"
-              :aria-label="RECEIPT_LABELS[ticksFor(row.message)]"
-            >
-              <svg viewBox="0 0 18 12" aria-hidden="true">
-                <path d="m1 6.4 3.1 3.3L10.6 2.4" />
-                <path v-if="ticksFor(row.message) !== 'sent'" d="m6.6 6.4 3.1 3.3L16.2 2.4" />
-              </svg>
-            </span>
-          </span>
-        </li>
-      </template>
+      <ChatMessages :room-id="roomId" :rows="rows" @react="onReact" />
     </ul>
 
     <div v-if="tray === 'emoji'" class="tray">
@@ -411,7 +345,6 @@ async function toggleNotifications() {
       <button class="btn btn--compact" type="button" @click="finishRecording">Send</button>
     </div>
 
-    <p v-if="sending" class="field-note">Sending {{ sending }}…</p>
     <p v-if="attachError" class="field-error">{{ attachError }}</p>
 
     <!-- Input on its own row: squeezed between the tools and Send it cropped its own placeholder. -->
@@ -452,7 +385,6 @@ async function toggleNotifications() {
             type="button"
             aria-label="Attach a file"
             title="Attach a file"
-            :disabled="Boolean(sending)"
             @click="fileInput?.click()"
           >
             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -476,7 +408,7 @@ async function toggleNotifications() {
             :class="{ active: recordingKind === 'VOICE' }"
             aria-label="Record a voice note"
             title="Record a voice note"
-            :disabled="Boolean(sending) || Boolean(recordingKind)"
+            :disabled="Boolean(recordingKind)"
             @click="beginRecording('VOICE')"
           >
             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -492,7 +424,7 @@ async function toggleNotifications() {
             :class="{ active: recordingKind === 'VIDEO_NOTE' }"
             aria-label="Record a video note"
             title="Record a video note"
-            :disabled="Boolean(sending) || Boolean(recordingKind)"
+            :disabled="Boolean(recordingKind)"
             @click="beginRecording('VIDEO_NOTE')"
           >
             <svg viewBox="0 0 24 24" aria-hidden="true">

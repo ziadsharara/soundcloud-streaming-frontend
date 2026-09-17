@@ -15,11 +15,17 @@ export function applyTyping(current = {}, notice, now = Date.now()) {
   return next
 }
 
-/** Drops anyone whose last keystroke is old enough that they have clearly stopped. */
+/**
+ * Drops anyone whose last keystroke is old enough that they have clearly stopped.
+ *
+ * Returns the map it was given when nobody has dropped out, so the check that runs every second
+ * and a half costs nothing when nothing has changed — a new object every time would redraw the
+ * whole room for no reason.
+ */
 export function pruneTyping(current = {}, now = Date.now(), ttl = TYPING_TTL_MS) {
-  return Object.fromEntries(
-    Object.entries(current).filter(([, entry]) => now - (entry?.at ?? 0) < ttl),
-  )
+  const entries = Object.entries(current)
+  const kept = entries.filter(([, entry]) => now - (entry?.at ?? 0) < ttl)
+  return kept.length === entries.length ? current : Object.fromEntries(kept)
 }
 
 export function typingNames(current = {}, myId = '') {
