@@ -14,9 +14,15 @@ import { looksLikeSeek, selectLatestPlayback } from '../playback'
 import { notifyChatMessage } from '../notifications'
 import { latestServerTime } from '../receipts'
 import { applyReactionUpdate } from '../reactions'
-import { attachmentKind, releaseAttachments, seedAttachment, uploadAttachment } from '../attachments'
+import {
+  attachmentKind,
+  releaseAttachments,
+  seedAttachment,
+  shrinkImage,
+  uploadAttachment,
+} from '../attachments'
 import { applyTyping, pruneTyping, typingLabel, typingNames } from '../typing'
-import { failMessage, mergeChatMessages, newClientId, pendingMessage } from '../roomState'
+import { failMessage, mergeChatMessages, newClientId, pendingMessage, withProgress } from '../roomState'
 import { connectToRoom } from '../stomp'
 import ProviderLogo from '../components/ProviderLogo.vue'
 import { detectProvider, isSetUrl, isSupportedUrl, parseUrls, providerBadge, urlLabel } from '../providers'
@@ -691,9 +697,26 @@ async function sendAttachment({ file, kind, durationMs = 0, text = '' }) {
     },
   })
   show(message)
+
+  // The bar only moves in steps: a progress event every few milliseconds would redraw the chat
+  // more often than anyone can see.
+  let shown = 0
+  const onProgress = (fraction) => {
+    if (fraction < 1 && fraction - shown < 0.05) return
+    shown = fraction
+    chat.value = withProgress(chat.value, message.clientId, fraction)
+  }
+
   try {
-    const attachment = await uploadAttachment(props.id, file, { kind, memberId: myId, durationMs })
-    seedAttachment(props.id, attachment.id, file)
+    // A photo off a phone is megabytes of detail a chat bubble will never show.
+    const sending = await shrinkImage(file)
+    const attachment = await uploadAttachment(props.id, sending, {
+      kind,
+      memberId: myId,
+      durationMs,
+      onProgress,
+    })
+    seedAttachment(props.id, attachment.id, sending)
     connection?.sendAttachment({ hostToken, attachmentId: attachment.id, text, clientId: message.clientId })
   } catch (e) {
     chat.value = failMessage(chat.value, message.clientId)

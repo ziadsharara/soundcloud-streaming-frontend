@@ -58,6 +58,13 @@ export function pendingMessage({
   }
 }
 
+/** How far a file being sent has got, 0 to 1, for the bar under the bubble. */
+export function withProgress(messages = [], clientId, progress) {
+  return messages.map((message) =>
+    message.clientId === clientId && message.pending ? { ...message, progress } : message,
+  )
+}
+
 /** Marks a pending message as one that never made it, so it is not left looking sent. */
 export function failMessage(messages = [], clientId) {
   return messages.map((message) =>

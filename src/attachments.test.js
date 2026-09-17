@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { attachmentKind, formatBytes, formatDuration } from './attachments'
+import { attachmentKind, formatBytes, formatDuration, shrinkImage } from './attachments'
 import { extensionFor, pickMimeType } from './recorder'
 
 describe('attachmentKind', () => {
@@ -48,5 +48,26 @@ describe('recording containers', () => {
   it('names the file after the container', () => {
     expect(extensionFor('audio/mp4')).toBe('mp4')
     expect(extensionFor('video/webm;codecs=vp8')).toBe('webm')
+  })
+})
+
+describe('shrinkImage', () => {
+  it('leaves alone anything that is not a big photo', async () => {
+    const pdf = new File([new Uint8Array(900_000)], 'a.pdf', { type: 'application/pdf' })
+    const small = new File([new Uint8Array(1000)], 'a.png', { type: 'image/png' })
+    const animated = new File([new Uint8Array(900_000)], 'a.gif', { type: 'image/gif' })
+    const drawing = new File([new Uint8Array(900_000)], 'a.svg', { type: 'image/svg+xml' })
+
+    expect(await shrinkImage(pdf)).toBe(pdf)
+    expect(await shrinkImage(small)).toBe(small)
+    expect(await shrinkImage(animated)).toBe(animated)
+    expect(await shrinkImage(drawing)).toBe(drawing)
+  })
+
+  it('keeps the original when the browser cannot decode it', async () => {
+    // Nothing here can decode an image; the file must still be sendable.
+    const photo = new File([new Uint8Array(900_000)], 'photo.jpg', { type: 'image/jpeg' })
+
+    expect(await shrinkImage(photo)).toBe(photo)
   })
 })

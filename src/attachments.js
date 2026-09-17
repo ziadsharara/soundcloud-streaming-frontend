@@ -56,9 +56,16 @@ export function formatDuration(ms = 0) {
   return `${minutes}:${String(total % 60).padStart(2, '0')}`
 }
 
-export async function uploadAttachment(roomId, file, { kind, memberId, durationMs = 0 } = {}) {
+/**
+ * Sends one file to the room, reporting how far it has got.
+ *
+ * XHR rather than fetch, for the one thing fetch cannot do: tell you how much of the file has
+ * gone. On a slow connection a voice note can take seconds to climb, and a bubble that sits there
+ * saying nothing looks broken.
+ */
+export function uploadAttachment(roomId, file, { kind, memberId, durationMs = 0, onProgress } = {}) {
   if (file.size > MAX_ATTACHMENT_BYTES) {
-    throw new Error(`${file.name || 'That file'} is larger than 25 MB.`)
+    return Promise.reject(new Error(`${file.name || 'That file'} is larger than 25 MB.`))
   }
   const body = new FormData()
   body.append('file', file, file.name || 'attachment')
@@ -66,18 +73,71 @@ export async function uploadAttachment(roomId, file, { kind, memberId, durationM
   if (memberId) body.append('memberId', memberId)
   if (durationMs) body.append('durationMs', String(Math.round(durationMs)))
 
-  const key = getRoomKey(roomId)
-  const res = await fetch(`${fileBase}/rooms/${encodeURIComponent(roomId)}/attachments`, {
-    method: 'POST',
-    headers: key ? { 'X-Room-Key': key } : {},
-    body,
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest()
+    request.open('POST', `${fileBase}/rooms/${encodeURIComponent(roomId)}/attachments`)
+    const key = getRoomKey(roomId)
+    if (key) request.setRequestHeader('X-Room-Key', key)
+
+    request.upload.onprogress = (event) => {
+      if (event.lengthComputable) onProgress?.(event.loaded / event.total)
+    }
+    request.onload = () => {
+      if (request.status >= 200 && request.status < 300) {
+        try {
+          onProgress?.(1)
+          return resolve(JSON.parse(request.responseText).attachment)
+        } catch {
+          return reject(new Error('That file could not be sent.'))
+        }
+      }
+      let detail = ''
+      try {
+        const problem = JSON.parse(request.responseText)
+        detail = problem?.detail || problem?.message || ''
+      } catch {
+        detail = ''
+      }
+      reject(new Error(detail || 'That file could not be sent.'))
+    }
+    request.onerror = () => reject(new Error('That file could not be sent. Check your connection.'))
+    request.onabort = () => reject(new Error('That file was not sent.'))
+    request.send(body)
   })
-  if (!res.ok) {
-    const problem = await res.json().catch(() => null)
-    throw new Error(problem?.detail || problem?.message || 'That file could not be sent.')
+}
+
+/**
+ * Shrinks a photo before it is sent.
+ *
+ * A picture straight off a phone is several megabytes of detail nobody will see in a chat bubble,
+ * and on a slow connection that is the difference between a moment and a minute. Anything that is
+ * not an ordinary photo — a video, a document, an image the browser cannot decode — is sent as it
+ * is, untouched.
+ */
+export async function shrinkImage(file, { maxEdge = 1600, quality = 0.82, minBytes = 400 * 1024 } = {}) {
+  const type = (file?.type || '').toLowerCase()
+  if (!type.startsWith('image/') || type.includes('gif') || type.includes('svg') || file.size < minBytes) {
+    return file
   }
-  const { attachment } = await res.json()
-  return attachment
+  try {
+    const bitmap = await createImageBitmap(file)
+    const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height))
+    const width = Math.round(bitmap.width * scale)
+    const height = Math.round(bitmap.height * scale)
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+    canvas.getContext('2d').drawImage(bitmap, 0, 0, width, height)
+    bitmap.close?.()
+
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality))
+    // Keep the original whenever the smaller version isn't actually smaller.
+    if (!blob || blob.size >= file.size) return file
+    const name = (file.name || 'photo').replace(/\.[^.]+$/, '') + '.jpg'
+    return new File([blob], name, { type: 'image/jpeg' })
+  } catch {
+    return file
+  }
 }
 
 /**

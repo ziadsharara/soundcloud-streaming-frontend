@@ -1994,6 +1994,23 @@ div.queue-play {
   }
 }
 
+/* How far a file has climbed, for the connections where that takes a moment. */
+.upload-bar {
+  display: block;
+  height: 4px;
+  margin-top: 5px;
+  border: 1.4px solid var(--line);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.upload-bar i {
+  display: block;
+  height: 100%;
+  background: var(--ink);
+  transition: width 0.15s linear;
+}
+
 /* A message on its way: present, legible, and clearly not landed yet. */
 .chat-message--pending .chat-said,
 .chat-message--pending .chat-meta {

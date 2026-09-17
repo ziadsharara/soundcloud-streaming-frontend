@@ -75,6 +75,16 @@ onBeforeUnmount(() => {
         </div>
 
         <p v-if="row.message.failed" class="field-error chat-failed">Not sent. Check your connection.</p>
+        <span
+          v-else-if="row.message.pending && row.message.progress > 0"
+          class="upload-bar"
+          role="progressbar"
+          :aria-valuenow="Math.round(row.message.progress * 100)"
+          aria-valuemin="0"
+          aria-valuemax="100"
+        >
+          <i :style="{ width: `${Math.round(row.message.progress * 100)}%` }"></i>
+        </span>
 
         <ul v-if="row.reactions.length" class="reactions">
           <li v-for="reaction in row.reactions" :key="reaction.emoji">

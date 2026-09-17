@@ -28,7 +28,7 @@ export const extensionFor = (mimeType) => (String(mimeType).includes('mp4') ? 'm
  */
 export async function startRecording({ video = false } = {}) {
   const stream = await navigator.mediaDevices.getUserMedia(
-    video ? { audio: true, video: { facingMode: 'user', width: 480, height: 480 } } : { audio: true },
+    video ? { audio: true, video: { facingMode: 'user', width: 400, height: 400, frameRate: 24 } } : { audio: true },
   )
   /*
    * Deliberately modest bitrates. A note is speech, not a master: at the browser's defaults a
@@ -37,7 +37,7 @@ export async function startRecording({ video = false } = {}) {
   const recorder = new MediaRecorder(stream, {
     ...(pickMimeType(video) ? { mimeType: pickMimeType(video) } : {}),
     audioBitsPerSecond: 48_000,
-    ...(video ? { videoBitsPerSecond: 700_000 } : {}),
+    ...(video ? { videoBitsPerSecond: 500_000 } : {}),
   })
   const mimeType = recorder.mimeType
   const chunks = []
