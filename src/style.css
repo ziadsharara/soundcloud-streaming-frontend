@@ -1299,11 +1299,13 @@ div.queue-play {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .chat-tools {
   display: flex;
   gap: 4px;
+  flex-wrap: wrap;
 }
 
 .tool-button {
@@ -1546,7 +1548,11 @@ div.queue-play {
   margin: 0;
 }
 
-.chat-head .tool-button svg {
+/*
+ * Every icon on a tool button is drawn, not filled — scoped to the chat header alone, the
+ * attach, voice-note and video-note buttons came out as solid blobs.
+ */
+.tool-button svg {
   width: 17px;
   height: 17px;
   fill: none;
