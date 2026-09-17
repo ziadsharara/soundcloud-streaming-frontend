@@ -10,6 +10,8 @@ import AvatarMark from './AvatarMark.vue'
  */
 const props = defineProps({
   members: { type: Array, default: () => [] },
+  /** A chat room has no music, so there is nothing to be listening to. */
+  chatOnly: { type: Boolean, default: false },
 })
 
 const listening = computed(() => props.members.filter((member) => member.listening).length)
@@ -19,7 +21,8 @@ const listening = computed(() => props.members.filter((member) => member.listeni
   <section class="card members sketch-frame-2">
     <div class="members-head">
       <p class="eyebrow">In the room</p>
-      <h3>
+      <h3 v-if="chatOnly">{{ members.length }} here</h3>
+      <h3 v-else>
         {{ listening }} listening
         <span v-if="members.length !== listening" class="muted">of {{ members.length }} here</span>
       </h3>
@@ -30,7 +33,11 @@ const listening = computed(() => props.members.filter((member) => member.listeni
         <AvatarMark :id="member.avatarId" :size="34" />
         <span class="member-name">{{ member.name }}</span>
         <span v-if="member.host" class="badge">host</span>
-        <span class="member-state" :title="member.listening ? 'Playing, in sync' : 'Here, not playing'">
+        <span
+          v-if="!chatOnly"
+          class="member-state"
+          :title="member.listening ? 'Playing, in sync' : 'Here, not playing'"
+        >
           <template v-if="member.listening">
             <span class="member-bars" aria-hidden="true"><i></i><i></i><i></i></span>
             listening

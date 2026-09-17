@@ -40,6 +40,7 @@ describe('room realtime connection', () => {
     expect(mocks.client.subscribe.mock.calls.map(([destination]) => destination)).toEqual([
       '/topic/rooms/ABC123/members',
       '/topic/rooms/ABC123/chat',
+      '/topic/rooms/ABC123/reactions',
       '/topic/rooms/ABC123/receipts',
       '/topic/rooms/ABC123/typing',
       '/topic/rooms/ABC123/queue',
@@ -138,5 +139,33 @@ describe('room realtime connection', () => {
     expect(onStatus).toHaveBeenCalledWith('connecting')
     expect(mocks.client.deactivate).toHaveBeenCalledWith({ force: true })
     expect(mocks.client.activate).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('shared queue and reactions', () => {
+  it('adds a track without claiming to be the host', () => {
+    const connection = connectToRoom('ABC123', {})
+    mocks.client.connected = true
+    mocks.client.onConnect()
+
+    connection.addQueueTrack('https://soundcloud.com/artist/song')
+
+    const [published] = mocks.client.publish.mock.calls
+      .map(([frame]) => frame)
+      .filter((frame) => frame.destination === '/app/rooms/ABC123/queue/add')
+    expect(JSON.parse(published.body)).toEqual({ trackUrl: 'https://soundcloud.com/artist/song' })
+  })
+
+  it('sends a reaction as a message id and an emoji', () => {
+    const connection = connectToRoom('ABC123', {})
+    mocks.client.connected = true
+    mocks.client.onConnect()
+
+    connection.sendReaction('message-1', '👍')
+
+    const [published] = mocks.client.publish.mock.calls
+      .map(([frame]) => frame)
+      .filter((frame) => frame.destination === '/app/rooms/ABC123/reaction')
+    expect(JSON.parse(published.body)).toEqual({ messageId: 'message-1', emoji: '👍' })
   })
 })

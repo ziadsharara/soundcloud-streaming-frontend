@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import AvatarMark from '../components/AvatarMark.vue'
 import ChatPanel from '../components/ChatPanel.vue'
@@ -9,10 +9,12 @@ import RoomLockGate from '../components/RoomLockGate.vue'
 import PressPlayCard from '../components/PressPlayCard.vue'
 import RoomPlayer from '../components/RoomPlayer.vue'
 import { api, clearHostToken, getHostToken, setRoomKey } from '../api'
-import { getIdentity, setIdentity } from '../identity'
-import { selectLatestPlayback } from '../playback'
+import { getIdentity, hasJoinedBefore, rememberJoined, setIdentity } from '../identity'
+import { looksLikeSeek, selectLatestPlayback } from '../playback'
 import { notifyChatMessage } from '../notifications'
 import { latestServerTime } from '../receipts'
+import { applyReactionUpdate } from '../reactions'
+import { releaseAttachments } from '../attachments'
 import { applyTyping, pruneTyping, typingLabel, typingNames } from '../typing'
 import { mergeChatMessages } from '../roomState'
 import { connectToRoom } from '../stomp'
@@ -26,6 +28,7 @@ const router = useRouter()
 const DRIFT_MS = 2500 // listeners re-seek when further than this from the host
 const SYNC_INTERVAL_MS = 3000 // how often listeners check their drift
 const HEARTBEAT_MS = 5000 // how often the host re-broadcasts its position
+const AUTOPLAY_CHECK_MS = 900 // how long to give the player before calling autoplay blocked
 const MAX_CHAT = 100
 
 const hostToken = getHostToken(props.id)
@@ -41,12 +44,17 @@ const members = ref([])
 const playback = ref(null)
 const chat = ref([])
 const receipts = ref({})
+const reactions = ref({})
 const typingPeople = ref({})
 let clockOffset = 0 // client clock minus server clock
 
 // The host named themselves when they made the room; guests pick a name and face at the door.
 const identity = ref(getIdentity())
-const joined = ref(isHost)
+/**
+ * The door is asked once. Coming back to a room this browser has already walked into — a reload,
+ * a reopened tab — goes straight back inside, with the same name, face and unlocked key.
+ */
+const joined = ref(isHost || (hasJoinedBefore(props.id) && Boolean(identity.value.name)))
 // A private room answers with a locked summary until its password has been answered.
 const locked = ref(false)
 const unlocking = ref(false)
@@ -54,6 +62,8 @@ const unlockError = ref('')
 const myId = identity.value.memberId
 /** Whether *our* audio is actually running: present in the room is not the same as listening. */
 const selfListening = ref(false)
+/** Set when the browser refused to start the music by itself, which needs one tap to undo. */
+const autoplayBlocked = ref(false)
 
 const player = ref(null)
 const playerUrl = ref('')
@@ -66,10 +76,13 @@ const volume = ref(80)
 
 const trackInput = ref('')
 const formError = ref('')
-const trackQueue = ref(readQueue())
+const queueNote = ref('')
+const trackQueue = ref([])
 const activeQueueIndex = ref(-1)
 let pendingAutoplay = false
 let pendingTrackUrl = ''
+/** A track the host asked to play before the server had it in the queue. */
+let pendingActiveUrl = ''
 let hostStarted = false
 let queueServerTime = 0
 
@@ -83,8 +96,11 @@ let broadcasting = false
 let broadcastQueued = false
 let broadcastRetryTimer = null
 let inviteFeedbackTimer = null
+let queueNoteTimer = null
 let typingTimer = null
+let autoplayCheckTimer = null
 
+const isChatRoom = computed(() => room.value?.kind === 'CHAT')
 const statusLabel = computed(
   () => ({ connected: 'Live', connecting: 'Connecting…', disconnected: 'Reconnecting…' })[status.value],
 )
@@ -95,17 +111,6 @@ const typingIndicator = computed(() => typingLabel(typingNames(typingPeople.valu
 const inviteButtonLabel = computed(
   () => inviteFeedback.value || (canNativeShare ? 'Share invite' : 'Copy invite link'),
 )
-
-watch(
-  trackQueue,
-  () => {
-    persistQueue()
-    broadcastQueue()
-  },
-  { deep: true },
-)
-watch(activeQueueIndex, broadcastQueue)
-watch(volume, (v) => player.value?.setVolume(v))
 
 onMounted(async () => {
   try {
@@ -128,7 +133,7 @@ onMounted(async () => {
     activeQueueIndex.value = trackQueue.value.indexOf(playback.value.trackUrl)
   }
   if (isHost && !playerUrl.value) restoreQueuedSource()
-  if (isHost) start()
+  if (joined.value) start()
 })
 
 onBeforeUnmount(teardown)
@@ -139,7 +144,8 @@ function applySnapshot(data) {
   playback.value = selectLatestPlayback(playback.value, data.playback)
   chat.value = mergeChatMessages(chat.value, data.chat, MAX_CHAT)
   receipts.value = data.receipts && typeof data.receipts === 'object' ? data.receipts : {}
-  if (!isHost) applyQueueState(data.queue)
+  reactions.value = data.reactions && typeof data.reactions === 'object' ? data.reactions : {}
+  applyQueueState(data.queue)
 }
 
 /** A link chosen on the home page before the room existed. */
@@ -148,8 +154,11 @@ function restoreQueuedSource() {
     const queued = JSON.parse(window.sessionStorage.getItem('soundstream:queued-source'))
     window.sessionStorage.removeItem('soundstream:queued-source')
     if (queued?.permalinkUrl && isSupportedUrl(queued.permalinkUrl)) {
-      activeQueueIndex.value = addToQueue(queued.permalinkUrl)
+      pendingActiveUrl = queued.permalinkUrl
       pendingAutoplay = true
+      // Chosen deliberately on the home page, so the room announces it even if the embed
+      // refuses to start on its own.
+      hostStarted = true
       showInPlayer(queued.permalinkUrl)
     }
   } catch {
@@ -162,6 +171,7 @@ async function unlockRoom(password) {
   unlockError.value = ''
   try {
     const { accessKey } = await api.unlockRoom(props.id, password)
+    // Kept for this browser, so the password is asked once and not again on every reload.
     setRoomKey(props.id, accessKey)
     const data = await api.getRoom(props.id)
     if (data.locked) {
@@ -171,7 +181,7 @@ async function unlockRoom(password) {
     locked.value = false
     applySnapshot(data)
     clockOffset = Date.now() - data.serverNow
-    if (isHost) start()
+    if (joined.value) start()
   } catch (e) {
     unlockError.value = e.message
   } finally {
@@ -183,12 +193,16 @@ function joinRoom(chosen) {
   // Keep the stable member id: the gate only chooses a name and a face.
   identity.value = { ...identity.value, ...chosen }
   setIdentity(chosen)
+  rememberJoined(props.id)
   joined.value = true
   start()
 }
 
 function start() {
   document.addEventListener('visibilitychange', onVisibilityChange)
+  // Audio that the browser refused to start on its own is started by the first real tap.
+  document.addEventListener('pointerdown', onUserGesture)
+  document.addEventListener('keydown', onUserGesture)
   connection = connectToRoom(
     props.id,
     {
@@ -199,20 +213,24 @@ function start() {
         connection?.sendListening(selfListening.value)
         acknowledgeChat()
         if (isHost) {
+          // A link carried in from the home page only reaches the queue once we are connected.
+          if (pendingActiveUrl) connection?.addQueueTrack(pendingActiveUrl)
           broadcastState()
-          broadcastQueue()
         } else {
           refreshPlaybackState()
         }
       },
       onError: (message) => (realtimeError.value = message),
       onPlayback: (state) => {
+        // A jump is followed exactly; ordinary playing is left to the drift check.
+        const seeked = looksLikeSeek(playback.value, state)
         playback.value = state
-        syncToHost()
+        syncToHost(seeked)
       },
       onQueue: applyQueueState,
       onMembers: (list) => (members.value = Array.isArray(list) ? list : []),
       onReceipts: (map) => (receipts.value = map && typeof map === 'object' ? map : {}),
+      onReactions: (update) => (reactions.value = applyReactionUpdate(reactions.value, update)),
       onTyping: (notice) => (typingPeople.value = applyTyping(typingPeople.value, notice)),
       onChat: (message) => {
         chat.value = mergeChatMessages(chat.value, [message], MAX_CHAT)
@@ -221,7 +239,7 @@ function start() {
       },
       onClosed: (payload) => {
         closed.value = true
-        closedReason.value = payload?.reason === 'empty' ? 'empty' : 'host'
+        closedReason.value = payload?.reason === 'host' ? 'host' : 'abandoned'
         teardown()
       },
     },
@@ -233,20 +251,30 @@ function start() {
     }),
   )
 
-  timer = isHost ? setInterval(broadcastState, HEARTBEAT_MS) : setInterval(syncToHost, SYNC_INTERVAL_MS)
+  if (!isChatRoom.value) {
+    timer = isHost ? setInterval(broadcastState, HEARTBEAT_MS) : setInterval(syncToHost, SYNC_INTERVAL_MS)
+  }
   // Indicators expire here rather than on the server, so a lost "stopped typing" self-heals.
   typingTimer = setInterval(() => (typingPeople.value = pruneTyping(typingPeople.value)), 1500)
+  // Coming back to a room this browser already knows counts as having walked in.
+  if (joined.value) rememberJoined(props.id)
 }
 
 function teardown() {
   document.removeEventListener('visibilitychange', onVisibilityChange)
+  document.removeEventListener('pointerdown', onUserGesture)
+  document.removeEventListener('keydown', onUserGesture)
   clearInterval(timer)
   clearInterval(typingTimer)
   clearTimeout(broadcastRetryTimer)
   clearTimeout(inviteFeedbackTimer)
+  clearTimeout(queueNoteTimer)
+  clearTimeout(autoplayCheckTimer)
   broadcastQueued = false
   connection?.disconnect()
   connection = null
+  // Let go of the voice notes and files this page had downloaded; the room still has them.
+  releaseAttachments()
 }
 
 // ---- Player ----
@@ -283,6 +311,7 @@ function onPlayerReady() {
     // does whenever autoplay is blocked. Without this the room would keep showing the previous
     // track. broadcastState() ignores a merely restored player.
     broadcastState()
+    checkAutoplay()
     return
   }
   syncToHost()
@@ -306,7 +335,10 @@ function setListening(listening) {
 
 function onPlayerEvent(type) {
   // Everyone reports this, host included: it is what the member list means by "listening".
-  if (type === 'play') setListening(true)
+  if (type === 'play') {
+    setListening(true)
+    autoplayBlocked.value = false
+  }
   if (type === 'pause' || type === 'finish') setListening(false)
   if (!isHost) return
   if (type === 'play') hostStarted = true
@@ -324,34 +356,36 @@ function onPlayerEvent(type) {
   broadcastRetryTimer = setTimeout(broadcastState, 250)
 }
 
-// ---- Host: queue ----
-
-function readQueue() {
-  if (!isHost) return []
-  try {
-    const saved = JSON.parse(window.localStorage.getItem(`soundstream:queue:${props.id}`))
-    return Array.isArray(saved) ? saved.filter(isSupportedUrl).slice(0, 100) : []
-  } catch {
-    return []
-  }
+/**
+ * Browsers refuse to start audio that nobody asked for. We try anyway — a tap on the join door
+ * usually counts — and only if the player is still silent do we ask for the one tap.
+ */
+function checkAutoplay() {
+  clearTimeout(autoplayCheckTimer)
+  autoplayCheckTimer = setTimeout(async () => {
+    if (!player.value || !playerReady.value) return
+    const wanted = isHost ? hostStarted : Boolean(playback.value?.playing)
+    if (!wanted) return
+    const paused = await player.value.isPaused()
+    autoplayBlocked.value = paused === true
+  }, AUTOPLAY_CHECK_MS)
 }
 
-function persistQueue() {
-  if (!isHost) return
-  try {
-    window.localStorage.setItem(`soundstream:queue:${props.id}`, JSON.stringify(trackQueue.value))
-  } catch {
-    // Private browsing can block storage; the in-memory queue still works.
-  }
+/** A real tap or key press unlocks audio; spend it on the music that was refused. */
+function onUserGesture() {
+  if (!autoplayBlocked.value) return
+  if (isHost) player.value?.play()
+  else syncToHost(true)
+  checkAutoplay()
 }
 
-function addToQueue(url) {
-  const existing = trackQueue.value.indexOf(url)
-  if (existing >= 0) return existing
-  trackQueue.value.push(url)
-  return trackQueue.value.length - 1
-}
+// ---- Queue ----
 
+/**
+ * Adding is open to the room: anyone can put a track on the end, and the server does the
+ * appending so two people adding at once cannot overwrite each other. Removing, reordering and
+ * choosing what plays stay with the host.
+ */
 function addUrls(playFirst) {
   const urls = parseUrls(trackInput.value)
   if (!urls.length) {
@@ -360,19 +394,29 @@ function addUrls(playFirst) {
   }
   const invalidIndex = urls.findIndex((url) => !isSupportedUrl(url))
   if (invalidIndex >= 0) {
-    formError.value = `Link ${invalidIndex + 1} isn\u2019t a SoundCloud or YouTube link.`
+    formError.value = `Link ${invalidIndex + 1} isn’t a SoundCloud or YouTube link.`
+    return
+  }
+  if (status.value !== 'connected') {
+    formError.value = 'Not connected to the room yet — try again in a moment.'
     return
   }
   formError.value = ''
-  const firstIndex = addToQueue(urls[0])
-  urls.slice(1).forEach(addToQueue)
+  urls.forEach((url) => connection?.addQueueTrack(url))
   trackInput.value = ''
-  if (playFirst) playQueueItem(firstIndex)
+
+  if (isHost && playFirst) {
+    pendingActiveUrl = urls[0]
+    loadSource(urls[0])
+    return
+  }
+  showQueueNote(urls.length === 1 ? 'Added to the queue' : `${urls.length} tracks added to the queue`)
 }
 
-function queueFromLibrary(url) {
-  const index = addToQueue(url)
-  if (activeQueueIndex.value < 0) playQueueItem(index)
+function showQueueNote(message) {
+  queueNote.value = message
+  clearTimeout(queueNoteTimer)
+  queueNoteTimer = setTimeout(() => (queueNote.value = ''), 2500)
 }
 
 function loadSource(sourceUrl) {
@@ -394,12 +438,14 @@ function loadSource(sourceUrl) {
   } else {
     pendingTrackUrl = url
   }
+  checkAutoplay()
 }
 
 function playQueueItem(index) {
   const url = trackQueue.value[index]
-  if (!url) return
+  if (!url || !isHost) return
   activeQueueIndex.value = index
+  publishQueue()
   loadSource(url)
 }
 
@@ -411,18 +457,23 @@ function playPrevious() {
   if (activeQueueIndex.value > 0) playQueueItem(activeQueueIndex.value - 1)
 }
 
+/** Host only, and the server checks the token again rather than trusting this. */
 function removeQueueItem(index) {
+  if (!isHost) return
   trackQueue.value.splice(index, 1)
   if (index < activeQueueIndex.value) activeQueueIndex.value -= 1
   else if (index === activeQueueIndex.value) activeQueueIndex.value = -1
+  publishQueue()
 }
 
 function clearQueue() {
+  if (!isHost) return
   trackQueue.value = []
   activeQueueIndex.value = -1
+  publishQueue()
 }
 
-function broadcastQueue() {
+function publishQueue() {
   if (!isHost || !connection) return
   connection.publishQueue({
     hostToken,
@@ -431,11 +482,22 @@ function broadcastQueue() {
   })
 }
 
+/** The server owns the queue; every browser, the host's included, draws what it sends back. */
 function applyQueueState(state) {
-  if (isHost || !state || state.serverTime < queueServerTime) return
+  if (!state || state.serverTime < queueServerTime) return
   queueServerTime = state.serverTime
   trackQueue.value = Array.isArray(state.trackUrls) ? [...state.trackUrls] : []
   activeQueueIndex.value = Number.isInteger(state.activeIndex) ? state.activeIndex : -1
+
+  // A track the host started before the server had it: mark it as the one playing.
+  if (isHost && pendingActiveUrl) {
+    const index = trackQueue.value.indexOf(pendingActiveUrl)
+    if (index >= 0) {
+      pendingActiveUrl = ''
+      activeQueueIndex.value = index
+      publishQueue()
+    }
+  }
 }
 
 // ---- Host: broadcasting ----
@@ -479,7 +541,9 @@ async function broadcastSnapshot() {
 }
 
 async function endStream() {
-  if (!window.confirm('End the stream for everyone?')) return
+  if (!window.confirm(isChatRoom.value ? 'Close this room for everyone?' : 'End the stream for everyone?')) {
+    return
+  }
   try {
     await api.closeRoom(props.id, hostToken)
     clearHostToken(props.id)
@@ -510,6 +574,11 @@ async function refreshPlaybackState(forceSync = false) {
   }
 }
 
+/**
+ * Follows the host: same track, same play or pause, same moment. Nobody has to press anything —
+ * a listener's player is loaded already playing, and only a browser that refuses autoplay asks
+ * for a tap.
+ */
 async function syncToHost(force = false) {
   const state = playback.value
   if (isHost || !joined.value || !state?.trackUrl || syncing) return
@@ -517,6 +586,7 @@ async function syncToHost(force = false) {
   // A different service means a different embed; remount rather than cross-load.
   if (!playerUrl.value || detectProvider(state.trackUrl) !== playerProvider.value) {
     showInPlayer(state.trackUrl, { autoPlay: state.playing })
+    checkAutoplay()
     return
   }
   if (!playerReady.value) return
@@ -529,8 +599,12 @@ async function syncToHost(force = false) {
     const paused = await player.value.isPaused()
     // A player that cannot report its state yet: leave it alone rather than guess.
     if (paused === null) return
-    if (state.playing && paused) player.value.play()
-    else if (!state.playing && !paused) player.value.pause()
+    if (state.playing && paused) {
+      player.value.play()
+      checkAutoplay()
+    } else if (!state.playing && !paused) {
+      player.value.pause()
+    }
 
     const target = expectedPosition(state)
     const position = await player.value.getPosition()
@@ -563,6 +637,8 @@ async function retryConnection() {
 
 const sendChat = (text) => connection?.sendChat({ hostToken, text })
 const sendSticker = (stickerId) => connection?.sendSticker({ hostToken, stickerId })
+const sendAttachment = ({ attachmentId, text }) => connection?.sendAttachment({ hostToken, attachmentId, text })
+const reactToMessage = (messageId, emoji) => connection?.sendReaction(messageId, emoji)
 
 /**
  * Tells the room how far we have got through the chat. Reading the newest message implies
@@ -619,12 +695,12 @@ async function shareInvite() {
     </div>
 
     <div v-else-if="closed" class="card ended sketch-frame">
-      <h2>{{ closedReason === 'empty' ? 'This room was closed' : 'The stream has ended' }}</h2>
+      <h2>{{ closedReason === 'host' ? 'The host closed this room' : 'This room was removed' }}</h2>
       <p class="muted">
         {{
-          closedReason === 'empty'
-            ? 'Everyone had left, so the room was cleaned up.'
-            : 'The host closed the room. Thanks for listening.'
+          closedReason === 'host'
+            ? 'Thanks for listening. The host ended it for everyone.'
+            : 'Nobody had been in it for a very long time.'
         }}
       </p>
       <RouterLink class="btn" to="/">Find another stream</RouterLink>
@@ -635,7 +711,15 @@ async function shareInvite() {
         <div class="room-title">
           <p class="eyebrow">
             <span v-if="!locked" class="live-dot" :class="`live-dot--${status}`"></span>
-            {{ locked ? 'Private room' : isHost ? 'You are hosting' : 'Listening along' }}
+            {{
+              locked
+                ? 'Private room'
+                : isHost
+                  ? 'You are hosting'
+                  : isChatRoom
+                    ? 'In the chat room'
+                    : 'Listening along'
+            }}
           </p>
           <h1>{{ room.name }}</h1>
           <div class="meta">
@@ -647,13 +731,16 @@ async function shareInvite() {
               <span class="pill" :class="`pill--${status}`">{{ statusLabel }}</span>
               <span>{{ members.length }} in the room</span>
             </template>
+            <span v-if="isChatRoom" class="pill">Chat only</span>
             <span v-if="room.privateRoom" class="pill">Private</span>
             <span>Code <strong class="mono">{{ room.id }}</strong></span>
           </div>
         </div>
         <div class="actions">
           <button v-if="!locked" class="btn btn--ghost" type="button" @click="shareInvite">{{ inviteButtonLabel }}</button>
-          <button v-if="isHost" class="btn btn--danger" type="button" @click="endStream">End stream</button>
+          <button v-if="isHost" class="btn btn--danger" type="button" @click="endStream">
+            {{ isChatRoom ? 'Close room' : 'End stream' }}
+          </button>
           <RouterLink v-else class="btn btn--ghost" to="/">Leave</RouterLink>
         </div>
       </header>
@@ -678,11 +765,12 @@ async function shareInvite() {
         v-else-if="!joined"
         :room-name="room.name"
         :host-name="room.hostName"
+        :chat-only="isChatRoom"
         @join="joinRoom"
       />
 
-      <div v-else class="room-grid">
-        <div class="stack">
+      <div v-else class="room-grid" :class="{ 'room-grid--chat': isChatRoom }">
+        <div v-if="!isChatRoom" class="stack">
           <section class="card now-playing sketch-frame">
             <img v-if="artwork" :src="artwork" alt="" class="artwork" />
             <div v-else class="artwork artwork--empty">♪</div>
@@ -703,7 +791,7 @@ async function shareInvite() {
             </div>
           </section>
 
-          <form v-if="isHost" class="card sketch-frame-2" @submit.prevent="addUrls(true)">
+          <form class="card sketch-frame-2" @submit.prevent="addUrls(isHost)">
             <label for="track-url">SoundCloud or YouTube links</label>
             <textarea
               id="track-url"
@@ -713,13 +801,20 @@ async function shareInvite() {
               autocomplete="off"
             ></textarea>
             <div class="button-row">
-              <button class="btn" type="submit">Play first + queue all</button>
-              <button class="btn btn--ghost" type="button" @click="addUrls(false)">Add to queue</button>
+              <button v-if="isHost" class="btn" type="submit">Play first + queue all</button>
+              <button v-else class="btn" type="submit">Add to queue</button>
+              <button v-if="isHost" class="btn btn--ghost" type="button" @click="addUrls(false)">
+                Add to queue
+              </button>
             </div>
             <p v-if="formError" class="field-error">{{ formError }}</p>
+            <p v-if="queueNote" class="field-note">{{ queueNote }}</p>
             <p class="hint">
-              Songs, playlists and albums all work. Everyone in the room hears the same moment of the
-              same track.
+              {{
+                isHost
+                  ? 'Songs, playlists and albums all work. Everyone in the room hears the same moment of the same track.'
+                  : 'Anyone can add to the queue. The host chooses what plays and what comes off it.'
+              }}
             </p>
           </form>
 
@@ -771,9 +866,13 @@ async function shareInvite() {
             </ol>
           </section>
 
-          <PressPlayCard v-if="playerUrl && !selfListening" :hosting="isHost" />
+          <PressPlayCard v-if="playerUrl && autoplayBlocked" :hosting="isHost" />
 
-          <section v-if="playerUrl" class="card sketch-frame-2 player-card">
+          <section
+            v-if="playerUrl"
+            class="card sketch-frame-2 player-card"
+            :class="{ 'player-card--set': isSetUrl(playerUrl) }"
+          >
             <RoomPlayer
               :key="`${playerProvider}-${playerKey}`"
               ref="player"
@@ -795,7 +894,7 @@ async function shareInvite() {
                 {{ resyncing ? 'Syncing…' : 'Sync now' }}
               </button>
             </div>
-            <p v-if="!isHost" class="hint">The host controls playback. You stay in sync automatically.</p>
+            <p v-if="!isHost" class="hint">The host controls playback. You follow automatically.</p>
           </section>
 
           <p v-else-if="!isHost" class="muted">Tuned in. Music starts when the host plays something.</p>
@@ -807,16 +906,20 @@ async function shareInvite() {
         </div>
 
         <aside class="stack side-column">
-          <MemberList :members="members" />
+          <MemberList :members="members" :chat-only="isChatRoom" />
           <ChatPanel
+            :room-id="id"
             :messages="chat"
             :members="members"
             :receipts="receipts"
+            :reactions="reactions"
             :my-id="myId"
             :connected="status === 'connected'"
             :typing-label="typingIndicator"
             @send="sendChat"
             @sticker="sendSticker"
+            @attachment="sendAttachment"
+            @react="reactToMessage"
             @typing="(typing) => connection?.sendTyping(typing)"
           />
         </aside>

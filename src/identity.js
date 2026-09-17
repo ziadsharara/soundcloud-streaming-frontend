@@ -50,6 +50,18 @@ export function setIdentity({ name, avatarId }) {
 
 export const hasIdentity = () => Boolean(getIdentity().name)
 
+const joinedKey = (roomId) => `soundstream:joined:${roomId}`
+
+/**
+ * Rooms this browser has already walked into.
+ *
+ * The door — name, face, and a private room's password — is asked once. A reload is not a new
+ * arrival, so it goes straight back to where it was, with the name and face it had.
+ */
+export const hasJoinedBefore = (roomId) => Boolean(storage((s) => s.getItem(joinedKey(roomId)), ''))
+export const rememberJoined = (roomId) => storage((s) => s.setItem(joinedKey(roomId), String(Date.now())))
+export const forgetJoined = (roomId) => storage((s) => s.removeItem(joinedKey(roomId)))
+
 /** A face for whoever has not picked one, kept stable per name so it does not flicker. */
 export function avatarFor(name, avatarId) {
   if (isKnownAvatar(avatarId)) return avatarId

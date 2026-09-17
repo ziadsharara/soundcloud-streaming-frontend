@@ -11,7 +11,7 @@ import { getRoomKey, webSocketUrl } from './api'
  */
 export function connectToRoom(
   roomId,
-  { onStatus, onPlayback, onQueue, onMembers, onChat, onReceipts, onTyping, onClosed, onError },
+  { onStatus, onPlayback, onQueue, onMembers, onChat, onReactions, onReceipts, onTyping, onClosed, onError },
   identity = () => ({}),
 ) {
   // The key travels on CONNECT: the server refuses subscriptions to a private room without it.
@@ -31,6 +31,7 @@ export function connectToRoom(
   client.onConnect = () => {
     client.subscribe(`/topic/rooms/${roomId}/members`, json(onMembers))
     client.subscribe(`/topic/rooms/${roomId}/chat`, json(onChat))
+    client.subscribe(`/topic/rooms/${roomId}/reactions`, json(onReactions))
     client.subscribe(`/topic/rooms/${roomId}/receipts`, json(onReceipts))
     client.subscribe(`/topic/rooms/${roomId}/typing`, json(onTyping))
     client.subscribe(`/topic/rooms/${roomId}/queue`, json(onQueue))
@@ -55,8 +56,13 @@ export function connectToRoom(
     announce,
     publishPlayback: (state) => publish(`/app/rooms/${roomId}/playback`, state),
     publishQueue: (state) => publish(`/app/rooms/${roomId}/queue`, state),
+    // Anyone can add to the queue; only the host's publishQueue can take something out of it.
+    addQueueTrack: (trackUrl) => publish(`/app/rooms/${roomId}/queue/add`, { trackUrl }),
     sendChat: (message) => publish(`/app/rooms/${roomId}/chat`, { kind: 'TEXT', ...message }),
     sendSticker: (message) => publish(`/app/rooms/${roomId}/chat`, { kind: 'STICKER', ...message }),
+    // The file is uploaded first; this is the message that puts it in the chat.
+    sendAttachment: (message) => publish(`/app/rooms/${roomId}/chat`, { kind: 'ATTACHMENT', ...message }),
+    sendReaction: (messageId, emoji) => publish(`/app/rooms/${roomId}/reaction`, { messageId, emoji }),
     sendReceipt: (receipt) => publish(`/app/rooms/${roomId}/receipt`, receipt),
     sendTyping: (typing) => publish(`/app/rooms/${roomId}/typing`, { typing }),
     // Present is not the same as listening; this is what separates the two in the member list.

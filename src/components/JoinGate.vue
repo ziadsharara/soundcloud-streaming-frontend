@@ -8,6 +8,7 @@ import { getIdentity } from '../identity'
 const props = defineProps({
   roomName: { type: String, default: '' },
   hostName: { type: String, default: '' },
+  chatOnly: { type: Boolean, default: false },
 })
 const emit = defineEmits(['join'])
 
@@ -58,6 +59,12 @@ function submit() {
 
     <p v-if="error" class="field-error">{{ error }}</p>
     <button class="btn btn--large btn--full" type="submit">Join the room</button>
-    <p class="hint">One tap here lets your browser start playing the music.</p>
+    <p class="hint">
+      {{
+        chatOnly
+          ? 'Your name and face are how the room knows you. You are asked this once.'
+          : 'One tap here lets your browser start the music on its own. You are asked this once.'
+      }}
+    </p>
   </form>
 </template>

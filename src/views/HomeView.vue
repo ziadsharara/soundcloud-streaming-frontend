@@ -1,5 +1,5 @@
 <script setup>
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import AvatarMark from '../components/AvatarMark.vue'
 import Doodle from '../components/Doodle.vue'
@@ -24,6 +24,7 @@ const roomName = ref('')
 const hostName = ref(saved.name)
 const hostAvatarId = ref(saved.avatarId)
 const sourceUrl = ref('')
+const roomKind = ref('MUSIC')
 const isPrivate = ref(false)
 const password = ref('')
 const creating = ref(false)
@@ -32,6 +33,14 @@ const createError = ref('')
 const code = ref('')
 const joinError = ref('')
 let timer = null
+
+/** A chat room is a private place to talk: no player, no links, and always behind a password. */
+const isChatRoom = computed(() => roomKind.value === 'CHAT')
+watch(roomKind, (kind) => {
+  if (kind !== 'CHAT') return
+  isPrivate.value = true
+  sourceUrl.value = ''
+})
 
 async function refresh() {
   try {
@@ -66,13 +75,15 @@ async function deleteRoom(room) {
 
 async function createRoom() {
   createError.value = ''
-  const url = sourceUrl.value.trim()
+  const url = isChatRoom.value ? '' : sourceUrl.value.trim()
   if (url && !isSupportedUrl(url)) {
     createError.value = 'Paste a SoundCloud or YouTube link — or leave it empty.'
     return
   }
-  if (isPrivate.value && password.value.trim().length < 4) {
-    createError.value = 'A private room needs a password of at least 4 characters.'
+  if ((isPrivate.value || isChatRoom.value) && password.value.trim().length < 4) {
+    createError.value = isChatRoom.value
+      ? 'A chat room needs a password of at least 4 characters.'
+      : 'A private room needs a password of at least 4 characters.'
     return
   }
   creating.value = true
@@ -81,7 +92,8 @@ async function createRoom() {
       roomName.value.trim(),
       hostName.value.trim(),
       hostAvatarId.value,
-      isPrivate.value ? password.value.trim() : undefined,
+      isPrivate.value || isChatRoom.value ? password.value.trim() : undefined,
+      roomKind.value,
     )
     setHostToken(room.id, hostToken)
     // The host keeps the key too, or they would be locked out of their own room.
@@ -177,7 +189,39 @@ onBeforeUnmount(() => clearInterval(timer))
       <div class="launch-grid">
         <form class="card sketch-frame sketch-shadow" @submit.prevent="createRoom">
           <h3>Host a room</h3>
-          <p class="muted">You hold the play button. Everyone else follows.</p>
+          <p class="muted">
+            {{
+              isChatRoom
+                ? 'A private room for talking. No music, just everyone in one place.'
+                : 'You hold the play button. Everyone else follows.'
+            }}
+          </p>
+
+          <fieldset class="visibility-picker">
+            <legend>What kind of room</legend>
+            <div class="visibility-choices">
+              <button
+                type="button"
+                class="visibility-choice"
+                :class="{ chosen: !isChatRoom }"
+                :aria-pressed="!isChatRoom"
+                @click="roomKind = 'MUSIC'"
+              >
+                <strong>Music room</strong>
+                <small>One player, everyone in sync, chat beside it</small>
+              </button>
+              <button
+                type="button"
+                class="visibility-choice"
+                :class="{ chosen: isChatRoom }"
+                :aria-pressed="isChatRoom"
+                @click="roomKind = 'CHAT'"
+              >
+                <strong>Chat room</strong>
+                <small>Just the chat — private, behind a password</small>
+              </button>
+            </div>
+          </fieldset>
 
           <div class="field-group">
             <label for="room-name">Room name</label>
@@ -206,12 +250,12 @@ onBeforeUnmount(() => clearInterval(timer))
             </div>
           </fieldset>
 
-          <div class="field-group">
+          <div v-if="!isChatRoom" class="field-group">
             <label for="source-url">First link <span class="muted">(optional)</span></label>
             <input id="source-url" v-model="sourceUrl" type="url" placeholder="https://soundcloud.com/artist/song" autocomplete="url" />
           </div>
 
-          <fieldset class="visibility-picker">
+          <fieldset v-if="!isChatRoom" class="visibility-picker">
             <legend>Who can walk in</legend>
             <div class="visibility-choices">
               <button
@@ -237,7 +281,7 @@ onBeforeUnmount(() => clearInterval(timer))
             </div>
           </fieldset>
 
-          <div v-if="isPrivate" class="field-group">
+          <div v-if="isPrivate || isChatRoom" class="field-group">
             <label for="room-password">Room password</label>
             <input
               id="room-password"
@@ -247,12 +291,18 @@ onBeforeUnmount(() => clearInterval(timer))
               placeholder="Share this with your friends"
               maxlength="100"
             />
-            <p class="hint">Anyone with the code still needs this to get in.</p>
+            <p class="hint">
+              {{
+                isChatRoom
+                  ? 'A chat room is always private. Anyone with the code still needs this to get in.'
+                  : 'Anyone with the code still needs this to get in.'
+              }}
+            </p>
           </div>
 
           <p v-if="createError" class="field-error">{{ createError }}</p>
           <button class="btn btn--large btn--full" type="submit" :disabled="creating">
-            {{ creating ? 'Opening your room…' : 'Create the room' }}
+            {{ creating ? 'Opening your room…' : isChatRoom ? 'Create the chat room' : 'Create the room' }}
           </button>
         </form>
 

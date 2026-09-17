@@ -49,8 +49,8 @@ export const api = {
     const key = getRoomKey(id)
     return request(`/rooms/${encodeURIComponent(id)}`, { headers: key ? { 'X-Room-Key': key } : {} })
   },
-  createRoom: (name, hostName, hostAvatarId, password) =>
-    request('/rooms', { method: 'POST', body: { name, hostName, hostAvatarId, password } }),
+  createRoom: (name, hostName, hostAvatarId, password, kind = 'MUSIC') =>
+    request('/rooms', { method: 'POST', body: { name, hostName, hostAvatarId, password, kind } }),
   unlockRoom: (id, password) =>
     request(`/rooms/${encodeURIComponent(id)}/unlock`, { method: 'POST', body: { password } }),
   closeRoom: (id, hostToken) =>

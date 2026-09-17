@@ -2,8 +2,10 @@
 import Doodle from './Doodle.vue'
 
 /**
- * The one instruction every listener needs: browsers will not start audio on their own, so the
- * room stays silent until each person presses play once.
+ * Shown only when the browser actually refused to start the music.
+ *
+ * The room tries to start playing by itself, and usually manages it; when a browser blocks that
+ * outright there is nothing for it but one tap, and this is how the room asks for it.
  *
  * Drawn rather than written, in the house style — a figure reaching for the play button, line art
  * on currentColor, no gradients — because a drawing of the action is understood before the
@@ -40,8 +42,9 @@ defineProps({
       <p class="eyebrow">Almost there</p>
       <h3>{{ hosting ? 'Press play to start the room' : 'Press play to hear the room' }}</h3>
       <p class="muted">
-        Your browser won’t start music on its own. Tap play once on the player below — after that
-        {{ hosting ? 'everyone follows you' : 'you stay in step with the host' }}.
+        Your browser blocked the sound from starting on its own. Tap play once on the player below —
+        after that {{ hosting ? 'everyone follows you' : 'you stay in step with the host' }}, with
+        nothing more to press.
       </p>
       <p class="hand press-play-note">
         one tap, then you’re in
